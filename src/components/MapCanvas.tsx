@@ -104,7 +104,9 @@ export function MapCanvas({
 
     const handleError = (event: unknown) => {
       const message = (event as { error?: { message?: string } }).error?.message
-      if (!message || message.includes('aborted')) return
+      // Aborted requests and missing glyphs/sprites are not worth a warning:
+      // the map keeps rendering, only the text labels are affected.
+      if (!message || message.includes('aborted') || /glyph|font|sprite/i.test(message)) return
       const now = Date.now()
       if (now - lastErrorAt < 5000) return
       lastErrorAt = now
