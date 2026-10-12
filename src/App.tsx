@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, X } from 'lucide-react'
 import { VIEW_PRESETS } from '@/config'
 import { defaultProviderId, type ProviderId } from '@/data/registry'
+import { DEFAULT_BASEMAP, type BasemapId } from '@/map/style'
 import type { AircraftCategory } from '@/data/types'
 import { ALL_CATEGORIES, type FleetFilters } from '@/engine/fleetController'
 import { useFleetSnapshot } from '@/hooks/useFleetSnapshot'
@@ -26,6 +27,8 @@ export default function App() {
   const [follow, setFollow] = useState(false)
   const [labels, setLabels] = useState(true)
   const [trail, setTrail] = useState(true)
+  const [basemap, setBasemap] = useState<BasemapId>(DEFAULT_BASEMAP)
+  const [basemapNames, setBasemapNames] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [handle, setHandle] = useState<MapCanvasHandle | null>(null)
   const [mapError, setMapError] = useState<string | null>(null)
@@ -126,6 +129,8 @@ export default function App() {
         follow={follow}
         labels={labels}
         trail={trail}
+        basemap={basemap}
+        basemapNames={basemapNames}
         onReady={setHandle}
         onSelect={handleSelect}
         onFollowChange={setFollow}
@@ -192,6 +197,8 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         providerId={providerId}
         onProviderChange={handleProviderChange}
+        basemap={basemap}
+        onBasemapChange={setBasemap}
         mode={mode}
         fleetSize={fleetSize}
         onFleetSizeChange={setFleetSize}
@@ -201,6 +208,8 @@ export default function App() {
         onLabelsChange={setLabels}
         trail={trail}
         onTrailChange={setTrail}
+        basemapNames={basemapNames}
+        onBasemapNamesChange={setBasemapNames}
         airborneOnly={airborneOnly}
         onAirborneOnlyChange={setAirborneOnly}
         onPreset={handlePreset}

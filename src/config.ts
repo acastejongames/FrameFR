@@ -8,8 +8,8 @@
 /** Repository slug — used for the edit/about links and the Pages base path. */
 export const REPO_URL = 'https://github.com/acastejongames/FrameFR'
 
-/** Attribution shown for the raster basemap (CARTO + OpenStreetMap). */
-export const BASEMAP_ATTRIBUTION = '© OpenStreetMap · © CARTO'
+/** Base URL of the OpenFreeMap style endpoint (one MapLibre style JSON per style). */
+export const OPENFREEMAP_STYLES_URL = 'https://tiles.openfreemap.org/styles'
 
 /**
  * Glyph endpoint used by MapLibre to rasterise the aircraft callsign labels.
