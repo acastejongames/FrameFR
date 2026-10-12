@@ -23,7 +23,7 @@ reales— y está preparada para consumir **fuentes ADS-B públicas** como
 | **React 19**    | Interfaz (componentes funcionales + hooks)                  |
 | **TypeScript**  | Tipado estricto en todo el proyecto                         |
 | **Vite**        | Servidor de desarrollo y build                              |
-| **MapLibre GL** | Cartografía interactiva (estilo ráster oscuro, sin API key) |
+| **MapLibre GL** | Cartografía vectorial interactiva con [OpenFreeMap](https://openfreemap.org) (sin API key) |
 | **Tailwind CSS 4** | Estilos (tema oscuro propio, sin dependencias de UI)     |
 | **Lucide**      | Iconografía                                                 |
 | **GitHub Actions** | CI y despliegue automático en GitHub Pages               |
@@ -57,7 +57,6 @@ Copia `.env.example` como `.env`. Todas son opcionales:
 | ---------------------- | ------------------------------ | ------------------------------------------- |
 | `VITE_ADSB_PROVIDER`   | `demo`                         | Proveedor inicial (`demo` o `adsblol`)       |
 | `VITE_FLEET_SIZE`      | `600`                          | Tamaño de la flota simulada                  |
-| `VITE_MAP_STYLE_URL`   | estilo ráster propio           | Estilo MapLibre alternativo                  |
 | `VITE_GLYPHS_URL`      | glifos de OpenFreeMap          | Tipografía de las etiquetas del mapa         |
 | `VITE_BASE_PATH`       | `/FrameFR/` en producción      | Ruta base del build                          |
 
@@ -77,7 +76,7 @@ src/
 ├─ engine/
 │  └─ fleetController.ts    # Bucle de animación, interpolación y publicación de datos
 ├─ map/
-│  ├─ style.ts              # Estilo oscuro del mapa base
+│  ├─ style.ts              # Estilos de OpenFreeMap y nombres del mapa
 │  ├─ aircraftIcons.ts      # Iconos de avión generados en canvas
 │  ├─ aircraftLayers.ts     # Fuentes y capas de MapLibre
 │  └─ palette.ts            # Bandas de altitud y colores
@@ -138,7 +137,8 @@ la UI necesitan cambios.
 - **Ficha derecha:** ruta con progreso y ETA, métricas en vivo, *Centrar* y *Seguir* (la cámara
   acompaña al avión; se desactiva al arrastrar el mapa).
 - **Barra inferior:** leyenda de altitudes, créditos y estado de la última actualización.
-- **Ajustes:** proveedor de datos, tamaño de flota, velocidad, etiquetas, estela, «solo en vuelo» y
+- **Ajustes:** proveedor de datos, estilo de mapa (Positron, Bright, Liberty, Dark, Fiord, 3D),
+  tamaño de flota, velocidad, etiquetas, nombres del mapa, estela, «solo en vuelo» y
   atajos de cámara (Global, Europa, España, EE. UU., Asia-Pacífico).
 - **Atajos:** `/` busca, `Esc` cierra la ficha o limpia la búsqueda.
 
@@ -170,8 +170,8 @@ https://acastejongames.github.io/FrameFR/
 
 ## Créditos
 
-- Cartografía: © [OpenStreetMap](https://www.openstreetmap.org/copyright) · ©
-  [CARTO](https://carto.com/attributions).
+- Cartografía: [OpenFreeMap](https://openfreemap.org) · [OpenMapTiles](https://www.openmaptiles.org/) ·
+  © [OpenStreetMap](https://www.openstreetmap.org/copyright).
 - Datos ADS-B en directo: [adsb.lol](https://adsb.lol).
 - Glifos del mapa: [OpenFreeMap](https://openfreemap.org).
 

@@ -4,7 +4,12 @@ import { DEFAULT_VIEW } from '@/config'
 import type { ProviderId } from '@/data/registry'
 import { FleetController, type FleetFilters } from '@/engine/fleetController'
 import { AIRCRAFT_LAYER, addAircraftLayers, setLabelsVisible, setTrailVisible } from '@/map/aircraftLayers'
-import { createBaseStyle } from '@/map/style'
+import {
+  captureBasemapNames,
+  getBasemap,
+  setBasemapNamesVisible,
+  type BasemapId,
+} from '@/map/style'
 import { formatAltitude, formatSpeed } from '@/lib/format'
 
 export interface MapCanvasHandle {
@@ -21,6 +26,8 @@ interface MapCanvasProps {
   follow: boolean
   labels: boolean
   trail: boolean
+  basemap: BasemapId
+  basemapNames: boolean
   onReady: (handle: MapCanvasHandle | null) => void
   onSelect: (id: string | null) => void
   onFollowChange: (follow: boolean) => void
@@ -46,6 +53,8 @@ export function MapCanvas({
   follow,
   labels,
   trail,
+  basemap,
+  basemapNames,
   onReady,
   onSelect,
   onFollowChange,
@@ -57,12 +66,37 @@ export function MapCanvas({
   const tooltipRef = useRef<HTMLDivElement>(null)
   const pointRef = useRef({ x: 0, y: 0 })
   const hoverIdRef = useRef<string | null>(null)
-  const latest = useRef({ providerId, fleetSize, filters, labels, trail, onReady, onSelect, onFollowChange, onError })
+  const appliedBasemap = useRef(basemap)
+  const latest = useRef({
+    providerId,
+    fleetSize,
+    filters,
+    labels,
+    trail,
+    basemap,
+    basemapNames,
+    onReady,
+    onSelect,
+    onFollowChange,
+    onError,
+  })
   const [ready, setReady] = useState(false)
   const [hover, setHover] = useState<HoverInfo | null>(null)
 
   useEffect(() => {
-    latest.current = { providerId, fleetSize, filters, labels, trail, onReady, onSelect, onFollowChange, onError }
+    latest.current = {
+      providerId,
+      fleetSize,
+      filters,
+      labels,
+      trail,
+      basemap,
+      basemapNames,
+      onReady,
+      onSelect,
+      onFollowChange,
+      onError,
+    }
   })
 
   /* ------------------------------------------------------ map lifecycle */
@@ -70,14 +104,17 @@ export function MapCanvas({
     const container = containerRef.current
     if (!container) return
 
+    const initialBasemap = getBasemap(latest.current.basemap)
     const map = new Map({
       container,
-      style: createBaseStyle(),
+      style: initialBasemap.url,
       center: DEFAULT_VIEW.center,
       zoom: DEFAULT_VIEW.zoom,
+      pitch: initialBasemap.pitch,
+      bearing: initialBasemap.bearing,
       minZoom: 1.5,
       maxZoom: 14,
-      maxPitch: 0,
+      maxPitch: initialBasemap.pitch,
       attributionControl: false,
       fadeDuration: 120,
       refreshExpiredTiles: false,
@@ -85,10 +122,16 @@ export function MapCanvas({
     mapRef.current = map
     let lastErrorAt = 0
 
-    const handleLoad = () => {
+    // Runs on the first style and again after every basemap change (setStyle
+    // wipes runtime layers, so the traffic layers must be registered again).
+    const handleStyleLoad = () => {
       addAircraftLayers(map)
       setLabelsVisible(map, latest.current.labels)
       setTrailVisible(map, latest.current.trail)
+      captureBasemapNames(map, latest.current.basemapNames)
+    }
+
+    const handleLoad = () => {
       const controller = new FleetController({
         map,
         providerId: latest.current.providerId,
@@ -153,6 +196,7 @@ export function MapCanvas({
       })
     }
 
+    map.on('style.load', handleStyleLoad)
     map.on('load', handleLoad)
     map.on('error', handleError)
     map.on('click', AIRCRAFT_LAYER, handleClick)
@@ -203,6 +247,21 @@ export function MapCanvas({
   useEffect(() => {
     if (mapRef.current) setTrailVisible(mapRef.current, trail)
   }, [trail, ready])
+
+  useEffect(() => {
+    if (mapRef.current) setBasemapNamesVisible(mapRef.current, basemapNames)
+  }, [basemapNames, ready])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || appliedBasemap.current === basemap) return
+    appliedBasemap.current = basemap
+    const option = getBasemap(basemap)
+    // Full rebuild (not diff) so the aircraft layers are cleanly re-added on style.load.
+    map.setStyle(option.url, { diff: false })
+    map.setMaxPitch(option.pitch)
+    map.easeTo({ pitch: option.pitch, bearing: option.bearing, duration: 600 })
+  }, [basemap])
 
   /* Keep the tooltip glued to the cursor between renders. */
   useEffect(() => {

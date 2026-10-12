@@ -2,12 +2,15 @@ import { ExternalLink } from 'lucide-react'
 import { FLEET_SIZES, REPO_URL, SPEED_FACTORS, VIEW_PRESETS } from '@/config'
 import { PROVIDERS, type ProviderId } from '@/data/registry'
 import type { ProviderMode } from '@/data/types'
+import { BASEMAPS, type BasemapId } from '@/map/style'
 
 interface SettingsPanelProps {
   open: boolean
   onClose: () => void
   providerId: ProviderId
   onProviderChange: (id: ProviderId) => void
+  basemap: BasemapId
+  onBasemapChange: (id: BasemapId) => void
   mode: ProviderMode
   fleetSize: number
   onFleetSizeChange: (size: number) => void
@@ -17,6 +20,8 @@ interface SettingsPanelProps {
   onLabelsChange: (value: boolean) => void
   trail: boolean
   onTrailChange: (value: boolean) => void
+  basemapNames: boolean
+  onBasemapNamesChange: (value: boolean) => void
   airborneOnly: boolean
   onAirborneOnlyChange: (value: boolean) => void
   onPreset: (center: [number, number], zoom: number) => void
@@ -27,6 +32,8 @@ export function SettingsPanel({
   onClose,
   providerId,
   onProviderChange,
+  basemap,
+  onBasemapChange,
   mode,
   fleetSize,
   onFleetSizeChange,
@@ -36,6 +43,8 @@ export function SettingsPanel({
   onLabelsChange,
   trail,
   onTrailChange,
+  basemapNames,
+  onBasemapNamesChange,
   airborneOnly,
   onAirborneOnlyChange,
   onPreset,
@@ -88,9 +97,37 @@ export function SettingsPanel({
         </Section>
       )}
 
+      {/* Basemap */}
+      <Section title="Estilo de mapa">
+        <div className="grid grid-cols-3 gap-1.5">
+          {BASEMAPS.map((option) => {
+            const active = option.id === basemap
+            return (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onBasemapChange(option.id)}
+                className={`rounded-lg border px-2 py-1.5 text-[11.5px] transition ${
+                  active
+                    ? 'border-accent/40 bg-white/[0.10] text-white'
+                    : 'border-white/[0.07] bg-white/[0.02] text-white/55 hover:bg-white/[0.06] hover:text-white'
+                }`}
+              >
+                {option.label}
+              </button>
+            )
+          })}
+        </div>
+        <p className="mt-2 text-[11px] leading-relaxed text-white/35">
+          Mapas de OpenFreeMap. 3D inclina la vista y extruye los edificios.
+        </p>
+      </Section>
+
       {/* Display */}
       <Section title="Visualización">
         <Toggle label="Etiquetas en el mapa" checked={labels} onChange={onLabelsChange} />
+        <Toggle label="Nombres del mapa (ciudades, calles…)" checked={basemapNames} onChange={onBasemapNamesChange} />
         <Toggle label="Estela del vuelo seleccionado" checked={trail} onChange={onTrailChange} />
         <Toggle label="Solo aeronaves en vuelo" checked={airborneOnly} onChange={onAirborneOnlyChange} />
       </Section>

@@ -33,20 +33,29 @@ export function StatusBar({ status, providerLabel, mode, stats, updatedAt }: Sta
           Mapa{' '}
           <a
             className="underline decoration-white/15 underline-offset-2 hover:text-white/60"
+            href="https://openfreemap.org/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            OpenFreeMap
+          </a>{' '}
+          ·{' '}
+          <a
+            className="underline decoration-white/15 underline-offset-2 hover:text-white/60"
+            href="https://www.openmaptiles.org/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            OpenMapTiles
+          </a>{' '}
+          ·{' '}
+          <a
+            className="underline decoration-white/15 underline-offset-2 hover:text-white/60"
             href="https://www.openstreetmap.org/copyright"
             target="_blank"
             rel="noreferrer"
           >
             OpenStreetMap
-          </a>{' '}
-          ·{' '}
-          <a
-            className="underline decoration-white/15 underline-offset-2 hover:text-white/60"
-            href="https://carto.com/attributions"
-            target="_blank"
-            rel="noreferrer"
-          >
-            CARTO
           </a>
         </span>
       </div>
