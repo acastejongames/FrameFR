@@ -1,0 +1,156 @@
+@import 'tailwindcss';
+
+/* ------------------------------------------------------------------ theme */
+@theme {
+  /* Surfaces, from the page background to the raised panels. */
+  --color-ink-950: #07080a;
+  --color-ink-900: #0a0c10;
+  --color-ink-850: #0d1015;
+  --color-ink-800: #12161d;
+  --color-ink-700: #1a2029;
+
+  /* Text */
+  --color-fg: #e7edf5;
+  --color-fg-muted: #8b95a5;
+  --color-fg-dim: #5d6675;
+
+  /* Accent (used sparingly: selection, live state, active controls) */
+  --color-accent: #5eead4;
+  --color-accent-soft: #2dd4bf;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+
+  --animate-pulse-dot: pulse-dot 2.4s ease-in-out infinite;
+  --animate-fade-in: fade-in 0.22s ease-out both;
+  --animate-pop-in: pop-in 0.16s ease-out both;
+
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.3;
+      transform: scale(0.72);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------- base */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-ink-950);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior: none;
+  }
+
+  ::selection {
+    background: rgba(94, 234, 212, 0.24);
+  }
+
+  /* MapLibre: keep the canvas from stealing the focus ring. */
+  .maplibregl-canvas:focus {
+    outline: none;
+  }
+}
+
+/* -------------------------------------------------------------- utilities */
+@layer components {
+  /* Frosted panel used by every floating surface. */
+  .panel {
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background-color: rgba(10, 12, 16, 0.82);
+    backdrop-filter: blur(18px) saturate(120%);
+    -webkit-backdrop-filter: blur(18px) saturate(120%);
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+      0 18px 50px -20px rgba(0, 0, 0, 0.9);
+  }
+
+  .panel-raised {
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background-color: rgba(16, 20, 26, 0.92);
+    backdrop-filter: blur(22px) saturate(120%);
+    -webkit-backdrop-filter: blur(22px) saturate(120%);
+    box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.95);
+  }
+
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+  }
+  .scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* Small square button used in the control clusters. */
+  .icon-btn {
+    display: grid;
+    place-items: center;
+    height: 2rem;
+    width: 2rem;
+    color: rgb(255 255 255 / 0.55);
+    transition:
+      color 0.15s ease,
+      background-color 0.15s ease;
+  }
+  .icon-btn:hover {
+    background-color: rgb(255 255 255 / 0.06);
+    color: rgb(255 255 255 / 0.9);
+  }
+  .icon-btn:active {
+    background-color: rgb(255 255 255 / 0.1);
+  }
+  .icon-btn[data-active='true'] {
+    color: var(--color-accent);
+  }
+
+  .label-caps {
+    font-size: 10px;
+    line-height: 1;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgb(255 255 255 / 0.38);
+  }
+}
