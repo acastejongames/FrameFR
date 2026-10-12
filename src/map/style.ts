@@ -48,5 +48,9 @@ export function createBaseStyle(): StyleSpecification {
   }
 }
 
-/** Font stack used by the callsign labels (must exist in the glyph endpoint). */
-export const LABEL_FONT = [GLYPH_FONT]
+/**
+ * Font stacks used by the callsign labels, tried in order. The first one that
+ * the glyph endpoint can serve wins; if none is available MapLibre simply skips
+ * the labels and the map keeps working.
+ */
+export const LABEL_FONT = [GLYPH_FONT, 'Open Sans Regular']
