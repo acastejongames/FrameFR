@@ -148,10 +148,25 @@ amarillo, naranja y rojo a medida que se gana altura.
 ## Despliegue
 
 El workflow `.github/workflows/deploy.yml` compila y publica en **GitHub Pages** cada `push` a
-`main` (o manualmente con *Run workflow* desde cualquier rama). El `base` del build se ajusta
-automáticamente a `/FrameFR/` en producción; usa `VITE_BASE_PATH` para otro destino.
+`main` (o manualmente con *Run workflow*). El `base` del build se ajusta automáticamente a
+`/FrameFR/` en producción; usa `VITE_BASE_PATH` para otro destino.
 
-Configuración necesaria en el repositorio: **Settings → Pages → Source: GitHub Actions**.
+**Activación única (no se puede automatizar desde la API con permisos de integración):**
+
+1. Entra en **Settings → Pages**.
+2. En *Build and deployment → Source* elige **GitHub Actions**.
+3. Guarda y, si quieres publicar ya, abre el último run de *Deploy to GitHub Pages* y pulsa
+   **Re-run all jobs** (o haz cualquier push a `main`).
+
+Cuando esté activo, la app quedará en:
+
+```
+https://acastejongames.github.io/FrameFR/
+```
+
+> Si prefieres otro hosting (Netlify, Cloudflare Pages, Vercel…), basta con `npm run build` y
+> publicar `dist/` como sitio estático. Para servirlo desde la raíz de un dominio, define
+> `VITE_BASE_PATH=/`.
 
 ## Créditos
 

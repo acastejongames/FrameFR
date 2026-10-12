@@ -103,6 +103,15 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [mapError])
 
+  // Never stay behind the loading veil: if MapLibre has not reported `load`
+  // after a while we reveal the UI anyway (any error is shown as a banner).
+  const [veilTimedOut, setVeilTimedOut] = useState(false)
+  useEffect(() => {
+    if (handle) return
+    const timer = setTimeout(() => setVeilTimedOut(true), 15_000)
+    return () => clearTimeout(timer)
+  }, [handle])
+
   const providerLabel = providerId === 'adsblol' ? 'adsb.lol' : 'Demo'
   const mode = providerId === 'adsblol' ? 'live' : 'simulated'
 
@@ -124,7 +133,7 @@ export default function App() {
       />
 
       {/* Loading veil */}
-      {!handle && (
+      {!handle && !veilTimedOut && (
         <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950">
           <div className="flex flex-col items-center gap-3">
             <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse-dot" />
