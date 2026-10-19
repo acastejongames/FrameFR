@@ -19,6 +19,8 @@ export interface AircraftFeatureProps {
   icon: string
   altitude: number
   selected: 0 | 1
+  /** Commercial flight number, shown in the label when available. */
+  label: string
 }
 
 export type AircraftFeature = Feature<Point, AircraftFeatureProps>
@@ -105,7 +107,7 @@ export function addAircraftLayers(map: Map): void {
       source: AIRCRAFT_SOURCE,
       minzoom: 6.5,
       layout: {
-        'text-field': ['get', 'callsign'],
+        'text-field': ['get', 'label'],
         'text-font': LABEL_FONT,
         'text-size': ['interpolate', ['linear'], ['zoom'], 6.5, 9, 10, 11],
         'text-offset': [0, 1.15],

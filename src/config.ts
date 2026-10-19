@@ -25,13 +25,27 @@ export const GLYPH_FONT = 'Noto Sans Regular'
 export const RENDER_INTERVAL_MS = 70
 
 /** How often (ms) the React UI is refreshed with a new snapshot. */
-export const UI_INTERVAL_MS = 500
+export const UI_INTERVAL_MS = 400
 
-/** Max number of rows rendered in the flight list (keeps React cheap). */
-export const MAX_LIST_ROWS = 80
+/** Max number of rows rendered in the flight table (keeps React cheap). */
+export const MAX_LIST_ROWS = 120
 
 /** Number of points kept in the trail of the selected aircraft. */
-export const TRAIL_LENGTH = 90
+export const TRAIL_LENGTH = 250
+
+/** Polling cadences offered in the settings panel. */
+export const POLL_INTERVALS = [
+  { value: 2_500, label: 'Rápida (2,5 s)' },
+  { value: 4_000, label: 'Estándar (4,0 s)' },
+  { value: 6_000, label: 'Moderada (6,0 s)' },
+  { value: 10_000, label: 'Ahorro (10,0 s)' },
+] as const
+
+/** Maximum number of aircraft rendered on the map. */
+export const MAX_AIRCRAFT_OPTIONS = [200, 350, 550, 750] as const
+
+/** Default number of aircraft rendered on the map. */
+export const DEFAULT_MAX_AIRCRAFT = 550
 
 /** Camera presets offered in the settings menu. */
 export interface ViewPreset {
@@ -60,3 +74,35 @@ export const FLEET_SIZES = [250, 600, 1200] as const
 
 /** Simulation speed multipliers. */
 export const SPEED_FACTORS = [1, 2, 5] as const
+
+/** Zoom presets of the "seguimiento" slider of the detail panel. */
+export const TRACKING_ZOOM_PRESETS = [
+  { label: 'Ruta', zoom: 6.8 },
+  { label: 'Aprox', zoom: 9.5 },
+  { label: 'Pista', zoom: 13.2 },
+] as const
+
+/** Default zoom used when the camera follows an aircraft. */
+export const DEFAULT_TRACKING_ZOOM = 8.8
+
+/** Which panels of the interface can be hidden from the settings. */
+export interface GuiVisibility {
+  clock: boolean
+  counter: boolean
+  hubs: boolean
+  legend: boolean
+  bottomControls: boolean
+}
+
+export const DEFAULT_GUI_VISIBILITY: GuiVisibility = {
+  clock: true,
+  counter: true,
+  hubs: true,
+  legend: true,
+  bottomControls: true,
+}
+
+/** How the traffic table is sorted. */
+export type SortKey = 'alt' | 'spd' | 'callsign'
+
+export const DEFAULT_SORT_KEY: SortKey = 'alt'

@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      base_path:
+        description: 'Ruta base del build (vacío = la de por defecto)'
+        required: false
+        type: string
 
 # Required by actions/deploy-pages.
 permissions:
@@ -22,12 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -35,15 +40,18 @@ jobs:
 
       - name: Type check and build
         run: npm run build
+        env:
+          # The site is served from https://<user>.github.io/<repo>/ by default.
+          VITE_BASE_PATH: ${{ inputs.base_path || format('/{0}/', github.event.repository.name) }}
 
       - name: Setup Pages
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@v5
         # Enables GitHub Pages (source: GitHub Actions) the first time it runs.
         with:
           enablement: true
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
@@ -57,4 +65,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@v4

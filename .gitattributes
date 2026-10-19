@@ -1,0 +1,7 @@
+# Normalise line endings and mark generated files as binary.
+* text=auto eol=lf
+
+dist/** linguist-generated=true
+dist-smoke/** linguist-generated=true
+dist-render/** linguist-generated=true
+package-lock.json linguist-generated=true

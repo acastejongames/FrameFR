@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Discusión y preguntas
+    url: https://github.com/acastejongames/FrameFR/discussions
+    about: Preguntas, ideas y comunidad.
+  - name: Vulnerabilidad de seguridad
+    url: https://github.com/acastejongames/FrameFR/security/advisories/new
+    about: Reporta los fallos de seguridad de forma privada.

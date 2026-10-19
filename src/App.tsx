@@ -1,122 +1,269 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, X } from 'lucide-react'
-import { VIEW_PRESETS } from '@/config'
+import {
+  DEFAULT_GUI_VISIBILITY,
+  DEFAULT_MAX_AIRCRAFT,
+  DEFAULT_SORT_KEY,
+  DEFAULT_TRACKING_ZOOM,
+  type GuiVisibility,
+  type SortKey,
+} from '@/config'
+import { fetchFlightTrail } from '@/data/flightTrail'
+import { loadHubItems, type HubItem } from '@/data/hubs'
+import { resolveAircraftPhoto, type AircraftPhoto } from '@/data/photos'
 import { defaultProviderId, type ProviderId } from '@/data/registry'
-import { DEFAULT_BASEMAP, type BasemapId } from '@/map/style'
-import type { AircraftCategory } from '@/data/types'
+import type { Aircraft } from '@/data/types'
 import { ALL_CATEGORIES, type FleetFilters } from '@/engine/fleetController'
 import { useFleetSnapshot } from '@/hooks/useFleetSnapshot'
+import { useGlobalSearch } from '@/hooks/useGlobalSearch'
+import { usePersistentState } from '@/hooks/usePersistentState'
+import { DEFAULT_BASEMAP, type BasemapId } from '@/map/style'
 import { AircraftDetail } from '@/components/AircraftDetail'
-import { FlightList } from '@/components/FlightList'
+import { AirportHubs } from '@/components/AirportHubs'
+import { HubsManager } from '@/components/HubsManager'
+import { FlightTable } from '@/components/FlightTable'
 import { MapCanvas, type MapCanvasHandle } from '@/components/MapCanvas'
 import { MapControls } from '@/components/MapControls'
-import { SettingsPanel } from '@/components/SettingsPanel'
-import { StatusBar } from '@/components/StatusBar'
+import { SettingsModal } from '@/components/SettingsModal'
+import { StatusLegend } from '@/components/StatusLegend'
+import { Toast } from '@/components/Toast'
 import { TopBar } from '@/components/TopBar'
 
-const DEFAULT_FLEET_SIZE = Number(import.meta.env.VITE_FLEET_SIZE ?? 600) || 600
+/** Toast helper: a message plus a monotonically increasing key. */
+interface ToastMessage {
+  text: string
+  key: number
+}
 
 export default function App() {
-  const [providerId, setProviderId] = useState<ProviderId>(defaultProviderId)
-  const [fleetSize, setFleetSize] = useState(DEFAULT_FLEET_SIZE)
-  const [speedFactor, setSpeedFactor] = useState(1)
-  const [query, setQuery] = useState('')
-  const [category, setCategory] = useState<AircraftCategory | null>(null)
-  const [airborneOnly, setAirborneOnly] = useState(false)
+  /* ------------------------------------------------------------ settings */
+  const [providerId, setProviderId] = usePersistentState<ProviderId>(
+    'provider',
+    defaultProviderId(),
+  )
+  const [pollIntervalMs, setPollIntervalMs] = usePersistentState<number>('poll-interval', 6_000)
+  const [maxAircraft, setMaxAircraft] = usePersistentState<number>(
+    'max-aircraft',
+    DEFAULT_MAX_AIRCRAFT,
+  )
+  const [basemap, setBasemap] = usePersistentState<BasemapId>('basemap', DEFAULT_BASEMAP)
+  const [showLabels, setShowLabels] = usePersistentState<boolean>('labels', true)
+  const [gui, setGui] = usePersistentState<GuiVisibility>('gui', DEFAULT_GUI_VISIBILITY)
+  const [sortBy, setSortBy] = usePersistentState<SortKey>('sort', DEFAULT_SORT_KEY)
+  const [hubItems, setHubItems] = usePersistentState<HubItem[]>('hubs', loadHubItems)
+
+  /* --------------------------------------------------------- local state */
+  const [fleetSize] = useState(Number(import.meta.env.VITE_FLEET_SIZE ?? 600) || 600)
+  const [speedFactor] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [follow, setFollow] = useState(false)
-  const [labels, setLabels] = useState(true)
-  const [trail, setTrail] = useState(true)
-  const [basemap, setBasemap] = useState<BasemapId>(DEFAULT_BASEMAP)
-  const [basemapNames, setBasemapNames] = useState(true)
+  const [trackingZoom, setTrackingZoom] = useState(DEFAULT_TRACKING_ZOOM)
+  const [is3D, setIs3D] = useState(false)
+  const [cleanMode, setCleanMode] = useState(false)
+  const [tableOpen, setTableOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [handle, setHandle] = useState<MapCanvasHandle | null>(null)
+  const [hubsManagerOpen, setHubsManagerOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [toast, setToast] = useState<ToastMessage | null>(null)
+  const [photo, setPhoto] = useState<AircraftPhoto | null | undefined>(undefined)
+  const [photoLoading, setPhotoLoading] = useState(false)
   const [mapError, setMapError] = useState<string | null>(null)
+  const [handle, setHandle] = useState<MapCanvasHandle | null>(null)
+  const [trailAltitudes, setTrailAltitudes] = useState<number[]>([])
 
   const searchRef = useRef<HTMLInputElement>(null)
-
+  const toastKey = useRef(0)
   const filters = useMemo<FleetFilters>(
-    () => ({
-      query,
-      categories: category ? [category] : ALL_CATEGORIES,
-      airborneOnly,
-    }),
-    [query, category, airborneOnly],
+    () => ({ query: '', categories: ALL_CATEGORIES, airborneOnly: false }),
+    [],
   )
 
   const snapshot = useFleetSnapshot(handle?.controller ?? null)
+  const search = useGlobalSearch()
   const selected = snapshot.selected && snapshot.selected.id === selectedId ? snapshot.selected : null
 
-  /* ------------------------------------------------------------ shortcuts */
+  const showToast = useCallback((text: string) => {
+    toastKey.current += 1
+    setToast({ text, key: toastKey.current })
+  }, [])
+
+  /* ---------------------------------------------------------- shortcuts */
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (settingsOpen) setSettingsOpen(false)
-        else if (document.activeElement === searchRef.current) setQuery('')
-        else setSelectedId(null)
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null
+      const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+
+      if (event.key === '/' && !typing) {
+        event.preventDefault()
+        if (cleanMode) setCleanMode(false)
+        searchRef.current?.focus()
         return
       }
-      if (event.key === '/' && !(event.target instanceof HTMLInputElement)) {
+
+      if ((event.key === 'u' || event.key === 'U') && !typing && !event.ctrlKey && !event.metaKey) {
         event.preventDefault()
-        searchRef.current?.focus()
+        setCleanMode((value) => !value)
+        return
+      }
+
+      if (event.key === 'Escape') {
+        if (settingsOpen) setSettingsOpen(false)
+        else if (tableOpen) setTableOpen(false)
+        else if (selectedId) setSelectedId(null)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [settingsOpen])
+  }, [cleanMode, selectedId, settingsOpen, tableOpen])
 
-  /* -------------------------------------------------------------- actions */
-  const handleProviderChange = useCallback(
-    (id: ProviderId) => {
-      setProviderId(id)
-      setSelectedId(null)
-      setFollow(false)
-    },
-    [],
-  )
+  // The clean mode is a class on <body> so the CSS can hide every panel.
+  useEffect(() => {
+    document.body.classList.toggle('ui-clean-mode', cleanMode)
+  }, [cleanMode])
 
-  const handlePreset = useCallback(
-    (center: [number, number], zoom: number) => {
-      handle?.map.flyTo({ center, zoom, duration: 1400, essential: true })
-    },
-    [handle],
-  )
+  /* ------------------------------------------------- photo and trail */
+  useEffect(() => {
+    if (!selected) {
+      setPhoto(undefined)
+      setTrailAltitudes([])
+      return
+    }
 
-  const handleWorldView = useCallback(() => {
-    const world = VIEW_PRESETS[0]
-    handle?.map.flyTo({ center: world.center, zoom: world.zoom, duration: 1400, essential: true })
-  }, [handle])
+    let cancelled = false
+    setPhotoLoading(true)
+    setPhoto(undefined)
 
-  const handleCenter = useCallback(
-    (id: string) => {
-      handle?.controller.centerOn(id)
-    },
-    [handle],
-  )
+    void resolveAircraftPhoto({
+      id: selected.id,
+      registration: selected.registration,
+      airlineName: selected.airlineName,
+      fullModel: selected.fullModel,
+    }).then((result) => {
+      if (cancelled) return
+      setPhoto(result)
+      setPhotoLoading(false)
+    })
 
+    const controller = new AbortController()
+    void fetchFlightTrail(selected.id, selected.zoneId, controller.signal)
+      .then((result) => {
+        if (cancelled || !result || !handle) return
+        handle.controller.setExternalTrail(
+          selected.id,
+          result.points.map((point) => ({
+            lon: point.lon,
+            lat: point.lat,
+            altitude: point.altitude,
+          })),
+        )
+        setTrailAltitudes(result.points.map((point) => point.altitude))
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [selected?.id, handle])
+
+  // Keep the sparkline up to date with the live trail.
+  useEffect(() => {
+    if (!selectedId || !handle) return
+    const timer = setInterval(() => {
+      setTrailAltitudes(handle.controller.trailAltitudes(selectedId))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [selectedId, handle])
+
+  /* ------------------------------------------------------------ actions */
   const handleSelect = useCallback((id: string | null) => {
     setSelectedId(id)
     if (!id) setFollow(false)
   }, [])
 
-  // Clear the error banner after a few seconds.
-  useEffect(() => {
-    if (!mapError) return
-    const timer = setTimeout(() => setMapError(null), 8000)
-    return () => clearTimeout(timer)
-  }, [mapError])
+  const handleSearchSelect = useCallback(
+    (aircraft: Aircraft) => {
+      // Inject the result so it is drawn on the map even when the active feed
+      // does not cover that area of the planet.
+      handle?.controller.upsertAircraft(aircraft)
+      setSelectedId(aircraft.id)
+      setFollow(false)
+      handle?.map.flyTo({
+        center: [aircraft.lon, aircraft.lat],
+        zoom: Math.max(handle.map.getZoom(), 8.5),
+        speed: 1.6,
+        essential: true,
+      })
+      showToast(`Volando a ${aircraft.callsign}`)
+    },
+    [handle, showToast],
+  )
 
-  // Never stay behind the loading veil: if MapLibre has not reported `load`
-  // after a while we reveal the UI anyway (any error is shown as a banner).
-  const [veilTimedOut, setVeilTimedOut] = useState(false)
-  useEffect(() => {
-    if (handle) return
-    const timer = setTimeout(() => setVeilTimedOut(true), 15_000)
-    return () => clearTimeout(timer)
+  const handleFlyTo = useCallback(
+    (lat: number, lon: number, zoom: number, label: string) => {
+      setFollow(false)
+      handle?.map.flyTo({ center: [lon, lat], zoom, speed: 1.4, essential: true })
+      showToast(`Volando a ${label}`)
+    },
+    [handle, showToast],
+  )
+
+  const handleRefresh = useCallback(() => {
+    handle?.controller.refresh()
+    showToast('Actualizando sector ADS-B…')
+  }, [handle, showToast])
+
+  const handleTrackingZoom = useCallback((zoom: number) => {
+    setTrackingZoom(zoom)
+    handle?.map.easeTo({ zoom, duration: 300 })
   }, [handle])
 
-  const providerLabel = providerId === 'adsblol' ? 'adsb.lol' : 'Demo'
-  const mode = providerId === 'adsblol' ? 'live' : 'simulated'
+  const handleFollowChange = useCallback(
+    (value: boolean) => {
+      setFollow(value)
+      if (value && selected) {
+        handle?.map.easeTo({
+          center: [selected.lon, selected.lat],
+          zoom: trackingZoom,
+          duration: 800,
+        })
+      }
+    },
+    [handle, selected, trackingZoom],
+  )
+
+  const handleLocate = useCallback(() => {
+    if (!navigator.geolocation) {
+      showToast('Geolocalización no soportada')
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) =>
+        handle?.map.flyTo({
+          center: [position.coords.longitude, position.coords.latitude],
+          zoom: 8.5,
+          speed: 1.3,
+          essential: true,
+        }),
+      () => showToast('Permiso de ubicación denegado'),
+    )
+  }, [handle, showToast])
+
+  const handleProviderChange = useCallback(
+    (id: ProviderId) => {
+      setProviderId(id)
+      setSelectedId(null)
+      setFollow(false)
+      showToast('Fuente ADS-B actualizada')
+    },
+    [setProviderId, showToast],
+  )
+
+  /* --------------------------------------------------------------- view */
+  const sourceLabel = snapshot.status.state === 'error' ? 'Reintentando…' : snapshot.status.state === 'live' ? snapshot.status.message ?? 'ADS-B en directo' : 'Conectando…'
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-ink-950 text-fg">
@@ -127,93 +274,165 @@ export default function App() {
         filters={filters}
         selectedId={selectedId}
         follow={follow}
-        labels={labels}
-        trail={trail}
+        followZoom={trackingZoom}
+        maxAircraft={maxAircraft}
+        pollIntervalMs={pollIntervalMs}
+        labels={showLabels}
+        trail
         basemap={basemap}
-        basemapNames={basemapNames}
+        basemapNames
+        is3D={is3D}
         onReady={setHandle}
         onSelect={handleSelect}
         onFollowChange={setFollow}
+        onZoomChange={setTrackingZoom}
         onError={setMapError}
       />
 
-      {/* Loading veil */}
-      {!handle && !veilTimedOut && (
-        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-ink-950">
-          <div className="flex flex-col items-center gap-3">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse-dot" />
-            <span className="text-[11px] uppercase tracking-[0.2em] text-white/35">
-              Cargando cartografía
-            </span>
-          </div>
-        </div>
-      )}
-
       <TopBar
         ref={searchRef}
-        status={snapshot.status}
-        mode={mode}
-        providerLabel={providerLabel}
-        stats={snapshot.stats}
         query={query}
-        onQueryChange={setQuery}
-        settingsOpen={settingsOpen}
-        onToggleSettings={() => setSettingsOpen((open) => !open)}
-      />
-
-      <FlightList
-        aircraft={snapshot.aircraft}
-        total={snapshot.stats.total}
-        filtered={snapshot.stats.filtered}
-        selectedId={selectedId}
-        onSelect={handleSelect}
-        category={category}
-        onCategoryChange={setCategory}
-      />
+        onQueryChange={(value) => {
+          setQuery(value)
+          search.schedule(value)
+        }}
+        results={search.results}
+        searching={search.searching}
+        onSelectResult={handleSearchSelect}
+        aircraftCount={snapshot.stats.filtered}
+        sourceLabel={sourceLabel}
+        live={snapshot.status.state === 'live'}
+        onRefresh={handleRefresh}
+        refreshing={snapshot.status.state === 'loading'}
+        tableOpen={tableOpen}
+        onToggleTable={() => setTableOpen((value) => !value)}
+        onOpenSettings={() => setSettingsOpen(true)}
+      >
+        <AirportHubs
+          items={hubItems}
+          onFlyTo={handleFlyTo}
+          visible={gui.hubs}
+          onManagerOpenChange={setHubsManagerOpen}
+        />
+      </TopBar>
 
       {selected && (
         <AircraftDetail
           aircraft={selected}
-          onClose={() => handleSelect(null)}
-          onCenter={handleCenter}
+          photo={photo}
+          photoLoading={photoLoading}
+          trailAltitudes={trailAltitudes}
           follow={follow}
-          onFollowChange={setFollow}
-          updatedAt={snapshot.updatedAt}
+          is3D={is3D}
+          trackingZoom={trackingZoom}
+          onClose={() => handleSelect(null)}
+          onFollowChange={handleFollowChange}
+          on3DChange={setIs3D}
+          onTrackingZoomChange={handleTrackingZoom}
+          onClearTrail={() => {
+            if (selectedId) handle?.controller.clearExternalTrail(selectedId)
+            setTrailAltitudes([])
+            showToast('Estela limpiada')
+          }}
+          onCenter={() =>
+            handle?.map.flyTo({
+              center: [selected.lon, selected.lat],
+              zoom: trackingZoom,
+              duration: 800,
+              essential: true,
+            })
+          }
         />
       )}
 
-      <MapControls map={handle?.map ?? null} onWorldView={handleWorldView} />
+      {tableOpen && (
+        <FlightTable
+          aircraft={snapshot.aircraft}
+          total={snapshot.stats.filtered}
+          selectedId={selectedId}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+          onSelect={(id) => {
+            handleSelect(id)
+            const aircraft = snapshot.aircraft.find((item) => item.id === id)
+            if (aircraft) {
+              handle?.map.flyTo({
+                center: [aircraft.lon, aircraft.lat],
+                zoom: Math.max(handle.map.getZoom(), 8.5),
+                duration: 650,
+                essential: true,
+              })
+            }
+          }}
+          onClose={() => setTableOpen(false)}
+        />
+      )}
 
-      <StatusBar
-        status={snapshot.status}
-        providerLabel={providerLabel}
-        mode={mode}
-        stats={snapshot.stats}
-        updatedAt={snapshot.updatedAt}
-      />
+      <footer className="pointer-events-none absolute inset-x-0 bottom-2.5 z-20 flex flex-wrap items-center justify-between gap-2 px-2.5">
+        <StatusLegend
+          visible={gui.legend}
+          count={snapshot.stats.filtered}
+          sourceLabel={sourceLabel}
+          live={snapshot.status.state === 'live'}
+          latencyMs={snapshot.status.latencyMs}
+          updatedAgo={
+            snapshot.status.lastUpdate
+              ? Math.max(0, Math.round((Date.now() - snapshot.status.lastUpdate) / 1000))
+              : undefined
+          }
+        />
+        <MapControls
+          basemap={basemap}
+          onBasemapChange={setBasemap}
+          showLabels={showLabels}
+          onShowLabelsChange={setShowLabels}
+          is3D={is3D}
+          on3DChange={setIs3D}
+          cleanMode={cleanMode}
+          onCleanModeToggle={() => setCleanMode((value) => !value)}
+          onLocate={handleLocate}
+          visible={gui.bottomControls}
+        />
+      </footer>
 
-      <SettingsPanel
+      <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         providerId={providerId}
         onProviderChange={handleProviderChange}
+        pollIntervalMs={pollIntervalMs}
+        onPollIntervalChange={setPollIntervalMs}
+        maxAircraft={maxAircraft}
+        onMaxAircraftChange={setMaxAircraft}
         basemap={basemap}
         onBasemapChange={setBasemap}
-        mode={mode}
-        fleetSize={fleetSize}
-        onFleetSizeChange={setFleetSize}
-        speedFactor={speedFactor}
-        onSpeedFactorChange={setSpeedFactor}
-        labels={labels}
-        onLabelsChange={setLabels}
-        trail={trail}
-        onTrailChange={setTrail}
-        basemapNames={basemapNames}
-        onBasemapNamesChange={setBasemapNames}
-        airborneOnly={airborneOnly}
-        onAirborneOnlyChange={setAirborneOnly}
-        onPreset={handlePreset}
+        gui={gui}
+        onGuiChange={setGui}
+        showLabels={showLabels}
+        onShowLabelsChange={setShowLabels}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
+        cleanMode={cleanMode}
+        onCleanModeToggle={() => setCleanMode((value) => !value)}
+        onOpenHubs={() => {
+          setSettingsOpen(false)
+          setHubsManagerOpen(true)
+        }}
       />
+
+      {hubsManagerOpen && (
+        <HubsManager
+          items={hubItems}
+          onChange={setHubItems}
+          onClose={() => setHubsManagerOpen(false)}
+          onFlyTo={(lat, lon, zoom, label) => {
+            setHubsManagerOpen(false)
+            handleFlyTo(lat, lon, zoom, label)
+          }}
+        />
+      )}
+
+      <Toast key={toast?.key ?? 'toast'} message={toast?.text ?? null} />
 
       {mapError && (
         <div className="pointer-events-auto absolute bottom-[70px] left-1/2 z-30 flex -translate-x-1/2 items-center gap-2.5 rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-[11.5px] text-amber-100/90 backdrop-blur-md">

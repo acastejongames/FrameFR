@@ -4,32 +4,48 @@ on:
   push:
     branches: ['**']
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
-    name: Type check, build and smoke test
+    name: Type check, tests and build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
       - name: Type check
-        run: npx tsc -b --force
+        run: npm run typecheck
 
-      - name: Headless simulation check
+      - name: Headless data layer check
         run: npm run smoke
+
+      - name: Headless render check
+        run: npm run check:render
 
       - name: Build
         run: npm run build
+
+      - name: Upload the build as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ github.sha }}
+          path: dist
+          retention-days: 7
+          if-no-files-found: error

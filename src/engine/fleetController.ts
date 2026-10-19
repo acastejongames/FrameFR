@@ -15,6 +15,7 @@ import {
   type AircraftFeature,
   type TrailFeature,
 } from '@/map/aircraftLayers'
+import { aircraftIconId } from '@/map/aircraftIcons'
 import { bandKey } from '@/map/palette'
 import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl'
 
@@ -91,6 +92,14 @@ interface Track {
   lastSeenAt: number
   /** Trail history as [lon, lat] pairs (only filled for the selection). */
   history: Array<[number, number]>
+  /** Altitude of every point of the trail, in feet (parallel to `history`). */
+  altitudes: number[]
+  /**
+   * Historical trajectory injected by the UI (Flightradar24 / OpenSky).
+   * When present it replaces the live trail, because it covers the whole
+   * flight instead of only the last few minutes.
+   */
+  externalTrail: Array<{ lon: number; lat: number; altitude: number }> | null
 }
 
 export const EMPTY_SNAPSHOT: FleetSnapshot = {
@@ -132,6 +141,10 @@ export class FleetController {
   private lastRenderAt = 0
   private lastUiAt = 0
   private pollDelay = 1000
+  /** Effective poll cadence of the active provider. */
+  private pollIntervalMs = 0
+  /** Cadence chosen by the user; `null` means "follow the provider". */
+  private pollIntervalOverride: number | null = null
   private polling = false
   private abort: AbortController | null = null
   private dataPending = false
@@ -139,6 +152,8 @@ export class FleetController {
 
   private selectedId: string | null = null
   private follow = false
+  private followZoom = 0
+  private maxAircraft = Number.POSITIVE_INFINITY
   private speedFactor = 1
 
   private status: ProviderStatus = { state: 'loading' }
@@ -151,6 +166,7 @@ export class FleetController {
     this.onFollowChange = options.onFollowChange
     if (options.filters) this.setFilters(options.filters)
     this.provider = createProvider(options.providerId, { fleetSize: options.fleetSize })
+    this.pollIntervalMs = this.provider.pollIntervalMs
     this.pollDelay = this.provider.pollIntervalMs
   }
 
@@ -191,16 +207,36 @@ export class FleetController {
   setSelected(id: string | null): void {
     if (this.selectedId === id) return
     const previous = this.selectedId ? this.tracks.get(this.selectedId) : undefined
-    if (previous) previous.history = []
+    if (previous) {
+      previous.history = []
+      previous.altitudes = []
+      previous.externalTrail = null
+    }
     this.selectedId = id
     const next = id ? this.tracks.get(id) : undefined
-    if (next) next.history = []
+    if (next) {
+      next.history = []
+      next.altitudes = []
+      next.externalTrail = null
+    }
     this.lastRenderAt = 0
     this.lastUiAt = 0
   }
 
   setFollow(follow: boolean): void {
     this.follow = follow
+    this.lastUiAt = 0
+  }
+
+  /** Zoom used while the camera follows the selected aircraft. */
+  setFollowZoom(zoom: number): void {
+    this.followZoom = clamp(zoom, 1.5, 22)
+  }
+
+  /** Maximum number of aircraft rendered on the map. */
+  setMaxAircraft(max: number): void {
+    this.maxAircraft = max > 0 ? max : Number.POSITIVE_INFINITY
+    this.lastRenderAt = 0
     this.lastUiAt = 0
   }
 
@@ -214,6 +250,12 @@ export class FleetController {
   }
 
   /** Swap the data source at runtime (demo ⇄ adsb.lol). */
+  /** Forces an immediate poll of the active provider. */
+  refresh(): void {
+    this.lastPollAt = 0
+    void this.poll()
+  }
+
   setProvider(id: ProviderId): void {
     if (id === this.providerId) return
     this.abort?.abort()
@@ -221,7 +263,8 @@ export class FleetController {
     this.providerId = id
     this.provider = createProvider(id, { fleetSize: this.fleetSize })
     this.provider.configure?.({ fleetSize: this.fleetSize })
-    this.pollDelay = this.provider.pollIntervalMs
+    this.pollIntervalMs = this.pollIntervalOverride ?? this.provider.pollIntervalMs
+    this.pollDelay = this.pollIntervalMs
     this.tracks.clear()
     this.selectedId = null
     this.status = { state: 'loading' }
@@ -252,6 +295,94 @@ export class FleetController {
     return { lat: track.cur.lat, lon: track.cur.lon }
   }
 
+  /**
+   * Injects a historical trajectory for a track.
+   *
+   * Live feeds only report the current position, so the trail drawn behind the
+   * selected aircraft is rebuilt from the Flightradar24 detail payload or from
+   * the OpenSky track history. When such a trail is available it replaces the
+   * "live" accumulation, which only covers the last few minutes.
+   */
+  setExternalTrail(id: string, points: Array<{ lon: number; lat: number; altitude: number }>): void {
+    const track = this.tracks.get(id)
+    if (!track || points.length < 2) return
+    track.externalTrail = points
+    this.lastRenderAt = 0
+    this.lastUiAt = 0
+  }
+
+  /**
+   * Injects an observation that did not come from the feed.
+   *
+   * The planet-wide search finds aircraft anywhere on the planet; when the
+   * user picks one of them, it has to appear on the map even if the active
+   * feed does not cover that area.
+   */
+  upsertAircraft(aircraft: Aircraft): void {
+    const now = performance.now()
+    const existing = this.tracks.get(aircraft.id)
+    const to: Pos = {
+      lat: aircraft.lat,
+      lon: aircraft.lon,
+      alt: aircraft.altitude,
+      heading: aircraft.heading,
+    }
+    if (existing) {
+      existing.from = { ...existing.cur }
+      existing.to = to
+      existing.t0 = now
+      existing.t1 = now + (this.pollIntervalMs || this.provider.pollIntervalMs)
+      existing.ac = aircraft
+      existing.hay = searchCorpus(aircraft)
+      existing.lastSeenAt = now
+    } else {
+      this.tracks.set(aircraft.id, {
+        ac: aircraft,
+        from: { ...to },
+        to,
+        cur: { ...to },
+        t0: now,
+        t1: now,
+        hay: searchCorpus(aircraft),
+        lastSeenAt: now,
+        history: [],
+        altitudes: [],
+        externalTrail: null,
+      })
+    }
+    this.lastRenderAt = 0
+    this.lastUiAt = 0
+  }
+
+  /** Altitudes of the trail currently drawn for a track. */
+  trailAltitudes(id: string): number[] {
+    const track = this.tracks.get(id)
+    if (!track) return []
+    if (track.externalTrail && track.externalTrail.length > 1) {
+      return track.externalTrail.map((point) => point.altitude)
+    }
+    return [...track.altitudes]
+  }
+
+  /** Removes the historical trajectory of a track. */
+  clearExternalTrail(id: string): void {
+    const track = this.tracks.get(id)
+    if (!track) return
+    track.externalTrail = null
+    track.history = []
+    track.altitudes = []
+    this.lastRenderAt = 0
+    this.lastUiAt = 0
+  }
+
+  /** Overrides the polling cadence of the active provider. */
+  setPollInterval(ms: number): void {
+    this.pollIntervalOverride = clamp(ms, 2_000, 60_000)
+    this.pollIntervalMs = this.pollIntervalOverride
+    this.pollDelay = this.pollIntervalMs
+    this.lastPollAt = 0
+  }
+
   /* --------------------------------------------------------------- private */
 
   private readonly handleUserDrag = (): void => {
@@ -276,7 +407,10 @@ export class FleetController {
       const track = this.tracks.get(this.selectedId)
       if (track) {
         this.interpolateTrack(track, now)
-        this.map.jumpTo({ center: [track.cur.lon, track.cur.lat] })
+        this.map.jumpTo({
+          center: [track.cur.lon, track.cur.lat],
+          zoom: this.followZoom > 0 ? this.followZoom : this.map.getZoom(),
+        })
       }
     }
 
@@ -320,13 +454,15 @@ export class FleetController {
     try {
       const list = await this.provider.poll(this.readViewport(), this.abort.signal)
       this.ingest(list, performance.now())
+      const source = this.provider.activeSource
+      const notice = this.provider.notice
       this.status = {
         state: 'live',
         lastUpdate: Date.now(),
         latencyMs: Math.round(performance.now() - started),
-        message: this.provider.notice,
+        message: [source, notice].filter(Boolean).join(' · ') || undefined,
       }
-      this.pollDelay = this.provider.pollIntervalMs
+      this.pollDelay = this.pollIntervalMs
     } catch (error) {
       this.status = {
         state: 'error',
@@ -334,14 +470,14 @@ export class FleetController {
         lastUpdate: this.status.lastUpdate,
       }
       // Back off a little before retrying a failing feed.
-      this.pollDelay = Math.max(this.provider.pollIntervalMs, 15_000)
+      this.pollDelay = Math.max(this.pollIntervalMs, 15_000)
     } finally {
       this.polling = false
     }
   }
 
   private ingest(list: Aircraft[], now: number): void {
-    const window = this.provider.pollIntervalMs
+    const window = this.pollIntervalMs || this.provider.pollIntervalMs
     const seen = new Set<string>()
 
     for (const ac of list) {
@@ -360,6 +496,8 @@ export class FleetController {
           hay: searchCorpus(ac),
           lastSeenAt: now,
           history: [],
+          altitudes: [],
+          externalTrail: null,
         })
         continue
       }
@@ -374,7 +512,11 @@ export class FleetController {
 
       if (ac.id === this.selectedId) {
         existing.history.push([to.lon, to.lat])
-        if (existing.history.length > TRAIL_LENGTH) existing.history.shift()
+        existing.altitudes.push(to.alt)
+        if (existing.history.length > TRAIL_LENGTH) {
+          existing.history.shift()
+          existing.altitudes.shift()
+        }
       }
     }
 
@@ -416,6 +558,7 @@ export class FleetController {
   private pushData(now = performance.now()): void {
     const features: AircraftFeature[] = []
     for (const [id, track] of this.tracks) {
+      if (features.length >= this.maxAircraft) break
       this.interpolateTrack(track, now)
       const selected = id === this.selectedId
       if (!selected && !this.matches(track)) continue
@@ -428,8 +571,9 @@ export class FleetController {
           callsign: track.ac.callsign,
           heading: track.cur.heading,
           altitude,
-          icon: selected ? 'ac-selected' : `ac-${bandKey(altitude, track.ac.onGround)}`,
+          icon: aircraftIconId(track.ac.silhouette, track.ac.onGround, selected),
           selected: selected ? 1 : 0,
+          label: track.ac.flightNumber || track.ac.callsign,
         },
       })
     }
@@ -450,14 +594,7 @@ export class FleetController {
     const trailSource = this.map.getSource(TRAIL_SOURCE) as GeoJSONSource | undefined
     if (trailSource) {
       const track = this.selectedId ? this.tracks.get(this.selectedId) : undefined
-      const line: TrailFeature | null =
-        track && track.history.length > 1
-          ? {
-              type: 'Feature',
-              geometry: { type: 'LineString', coordinates: [...track.history, [track.cur.lon, track.cur.lat]] },
-              properties: {},
-            }
-          : null
+      const line: TrailFeature | null = this.buildTrailLine(track)
       if (line || this.trailHadData) {
         this.trailHadData = Boolean(line)
         trailSource
@@ -465,6 +602,39 @@ export class FleetController {
           .catch(() => undefined)
       }
     }
+  }
+
+  /**
+   * Builds the GeoJSON line of the selected aircraft.
+   *
+   * The historical trajectory (when it could be downloaded) wins over the live
+   * accumulation, because it covers the whole flight and not only the last
+   * couple of minutes.
+   */
+  private buildTrailLine(track: Track | undefined): TrailFeature | null {
+    if (!track) return null
+
+    if (track.externalTrail && track.externalTrail.length > 1) {
+      const coordinates: Array<[number, number]> = track.externalTrail.map((point) => [
+        point.lon,
+        point.lat,
+      ])
+      coordinates.push([track.cur.lon, track.cur.lat])
+      return { type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: {} }
+    }
+
+    if (track.history.length > 1) {
+      return {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [...track.history, [track.cur.lon, track.cur.lat]],
+        },
+        properties: {},
+      }
+    }
+
+    return null
   }
 
   /** Recompute the React-visible snapshot and notify subscribers. */
@@ -528,14 +698,21 @@ export class FleetController {
 function searchCorpus(ac: Aircraft): string {
   return [
     ac.callsign,
+    ac.flightNumber ?? '',
+    ac.airlineName ?? '',
     ac.operator ?? '',
     ac.registration ?? '',
     ac.type ?? '',
+    ac.fullModel ?? '',
     ac.id,
     ac.origin?.iata ?? '',
     ac.origin?.icao ?? '',
     ac.destination?.iata ?? '',
     ac.destination?.icao ?? '',
+    ac.route?.origin ?? '',
+    ac.route?.destination ?? '',
+    ac.route?.originCity ?? '',
+    ac.route?.destinationCity ?? '',
   ]
     .join(' ')
     .toUpperCase()

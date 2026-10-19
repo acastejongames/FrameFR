@@ -1,0 +1,67 @@
+name: Informe de error
+description: Algo no funciona como debería
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar el problema. Cuanta más información des, antes lo
+        arreglamos.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: ¿Qué ocurre?
+      description: Describe el comportamiento esperado y el observado.
+      placeholder: Al mover el mapa, el contador de aviones se queda a 0…
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Pasos para reproducirlo
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Proveedor de datos
+      description: ¿Qué fuente estabas usando?
+      placeholder: auto / fr24 / adsblol / demo…
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Zona y hora
+      description: Aeropuerto o zona aproximada y hora en UTC.
+      placeholder: LEPA, 2025-06-01 14:32 UTC
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errores de consola
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: browser
+    attributes:
+      label: Navegador y versión
+      placeholder: Firefox 128 / Chrome 126 / Safari 17
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Comprobaciones
+      options:
+        - label: He buscado el problema en las incidencias abiertas.
+          required: true
