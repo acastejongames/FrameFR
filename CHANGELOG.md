@@ -1,3 +1,21 @@
+## Vista 3D sobre el mapa real a pantalla completa — 2026-10-19
+
+- La *Vista 3D* ahora ocupa **toda la pantalla**, como las vistas 3D de
+  referencia: el avión en primer plano, el terreno real debajo y el horizonte
+  al fondo.
+- El suelo ya no es una retícula oscura: se componen **imágenes satelitales**
+  (Esri World Imagery, con respaldo de OpenStreetMap) alrededor de la posición
+  real del avión, con **relieve de terreno** del DEM público de Terrarium
+  (AWS/Mapzen), cielo degradado y niebla en el horizonte. La atribución de las
+  fuentes aparece en la propia vista.
+- La ventana de suelo cubre ~80 km en crucero, 40 km en aproximación y 20 km
+  cerca del suelo, y se re-centra automáticamente según el avión avanza: el
+  mapa se desliza bajo el avión durante el vuelo.
+- La cámara inicial se coloca en **persecución detrás del avión**; arrastrar
+  orbita, la rueda acerca y `Esc` sigue cerrando la vista.
+- La retícula procedural solo aparece como último respaldo si no se puede
+  descargar ninguna tesela.
+
 ## Vista 3D de aviones con modelos a escala 1:1 — 2026-10-19
 
 - Nueva **Vista 3D** en la ficha de la aeronave para las familias compatibles

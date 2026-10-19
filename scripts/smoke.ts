@@ -10,6 +10,15 @@ import {
   modelAltitudeY,
   modelScaleFor,
 } from '../src/data/aircraft3d'
+import {
+  decodeTerrariumPixel,
+  groundWindow,
+  metersPerPixel,
+  terrainTilesOf,
+  tilePosition,
+  tileUrl,
+  tileZoomForAltitude,
+} from '../src/data/mapTiles'
 import { northResetDelta } from '../src/components/MapCompass'
 /**
  * Headless sanity check for the data layer.
@@ -492,6 +501,35 @@ console.log('· Modelos 3D y vista orbital…')
   check(Math.abs(modelAltitudeY(32808, false, 11) - 10000) < 0.5, '3D: altitud real en metros sobre el mapa')
   check(modelAltitudeY(0, true, 11) === 5.5, '3D: en tierra las ruedas tocan el mapa')
   check(modelAltitudeY(0, false, 11) === 5.5, '3D: altitud 0 se trata como suelo')
+}
+
+console.log('· Teselas del terreno del visor 3D…')
+{
+  check(Math.abs(metersPerPixel(0, 0) - 156_543.03) < 0.01, 'teselas: escala mercator en el ecuador')
+  check(Math.abs(metersPerPixel(60, 0) - 156_543.03 * 0.5) < 0.01, 'teselas: corrección de latitud')
+  check(tileZoomForAltitude(0) === 14 && tileZoomForAltitude(799) === 14, 'teselas: zoom 14 cerca del suelo')
+  check(tileZoomForAltitude(800) === 13 && tileZoomForAltitude(2999) === 13, 'teselas: zoom 13 en aproximación')
+  check(tileZoomForAltitude(3000) === 12 && tileZoomForAltitude(11_000) === 12, 'teselas: zoom 12 en crucero')
+  const pos = tilePosition(0, 0, 1)
+  check(pos.fx === 1 && Math.abs(pos.fy - 1) < 1e-9, 'teselas: posición mundial en el centro')
+  const win = groundWindow(0, 0, 13)
+  check(win.x0 === 4092 && win.y0 === 4092 && win.n === 8, 'teselas: ventana alineada a teselas')
+  check(Math.abs(win.offsetEastM) < 1e-6 && Math.abs(win.offsetNorthM) < 1e-6, 'teselas: centro exacto sin desfase')
+  check(Math.abs(win.sizeMeters - 8 * 256 * (156_543.03 / 8192)) < 1, 'teselas: 39 km de lado en z13')
+  const terrain = terrainTilesOf(win)
+  check(
+    terrain.z === 15 && terrain.x0 === win.x0 * 4 && terrain.y0 === win.y0 * 4,
+    'teselas: el DEM z+2 cubre exactamente la misma ventana',
+  )
+  const off = groundWindow(40, -3.5, 13)
+  check(
+    Math.abs(off.offsetEastM) <= off.sizeMeters / 2 && Math.abs(off.offsetNorthM) <= off.sizeMeters / 2,
+    'teselas: el desfase queda dentro de la ventana',
+  )
+  check(decodeTerrariumPixel(128, 0, 0) === 0, 'teselas: terrarium nivel del mar')
+  check(decodeTerrariumPixel(129, 0, 0) === 256, 'teselas: terrarium +256 m')
+  check(Math.abs(decodeTerrariumPixel(128, 1, 0) - 1) < 0.01, 'teselas: terrarium +1 m')
+  check(tileUrl('https://x/{z}/{x}/{y}.png', 5, 9, 3) === 'https://x/5/9/3.png', 'teselas: URL XYZ')
 }
 
 if (failures > 0) {

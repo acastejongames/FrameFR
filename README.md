@@ -115,12 +115,15 @@ completa con:
   ruta, altitud, velocidad, régimen, perfil de altitud, estela y acciones
   *Seguir* / *Inclinación* / *Vista 3D* / *Limpiar estela*.
 - **Vista 3D del avión:** para aeronaves compatibles (familias **A320, A350,
-  A380, B737 y B787**) el botón *Vista 3D* abre un visor orbital con el modelo
-  a **escala 1:1** (longitud real: 37,6 m / 66,8 m / 72,7 m / 39,5 m / 56,7 m).
-  El avión se coloca a su **altitud real sobre el plano del mapa** —0 m con las
-  ruedas en tierra— con una línea de referencia y el rumbo al norte marcado.
-  Arrastra para **orbitar la cámara** alrededor del avión y usa la rueda para
-  acercarte; `Esc` cierra. El suelo deslizante muestra el avance sobre el mapa.
+  A380, B737 y B787**) el botón *Vista 3D* abre un visor orbital a pantalla
+  completa con el modelo a **escala 1:1** (longitud real: 37,6 m / 66,8 m /
+  72,7 m / 39,5 m / 56,7 m). Debajo se dibuja **el mapa real** sobre la posición
+  del avión —imágenes satelitales de Esri con relieve de terreno (Terrarium) y
+  respaldo de OpenStreetMap— con cielo y horizonte; el avión vuela a su
+  **altitud real** con una línea de referencia al suelo y rumbo al norte. La
+  cámara arranca en persecución detrás del avión; arrastra para **orbitar**,
+  usa la rueda para acercar y `Esc` cierra. El terreno se re-centra y recarga
+  según el avión avanza y su altitud.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
   altitud, velocidad o indicativo.
 - **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
@@ -151,6 +154,7 @@ src/
 │  ├─ airlineCodes.ts        #    ICAO → IATA + nombre de aerolínea
 │  ├─ aircraftTypes.ts       #    Tipos de aeronave y familias de silueta
 │  ├─ aircraft3d.ts          #    Registro de modelos 3D y escala 1:1
+│  ├─ mapTiles.ts            #    Teselas satelitales y relieve del visor 3D
 │  ├─ category.ts            #    Clasificación comercial / carga / GA / militar
 │  ├─ hubs.ts                #    Accesos a aeropuertos (persistencia)
 │  ├─ globalSearch.ts        #    Búsqueda planetaria
@@ -233,11 +237,14 @@ interfaz necesitan cambios.
   una recta inventada.
 - Los sprites se generan en canvas: 24 iconos (8 familias × 3 estados) por
   menos de 4 KB de bundle.
-- Three.js y los modelos GLB solo se descargan al abrir la *Vista 3D*
-  (chunk `Aircraft3DViewer` diferido). El modelo se normaliza en tiempo de
-  ejecución a la longitud real de su variante: escala 1:1 garantizada aunque
-  cada GLB venga en unidades distintas. La página de desarrollo
-  `model-check.html` renderiza los cinco modelos con el registro real.
+- Three.js, los modelos GLB y las teselas del terreno solo se descargan al
+  abrir la *Vista 3D* (chunk `Aircraft3DViewer` diferido). El suelo compone
+  8×8 teselas satelitales (~40–80 km según altitud) más el relieve del DEM
+  público de Terrarium, y se re-centra cada pocos kilómetros de vuelo. El
+  modelo se normaliza en tiempo de ejecución a la longitud real de su variante:
+  escala 1:1 garantizada aunque cada GLB venga en unidades distintas. La página
+  de desarrollo `model-check.html` renderiza los cinco modelos con el registro
+  real.
 - Probado para una resolución de referencia de 2560 × 1440.
 
 ## Meteorología y alcance de la migración
