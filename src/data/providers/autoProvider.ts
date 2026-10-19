@@ -162,25 +162,22 @@ export class AutoProvider implements AircraftProvider {
   }
 }
 
-/** Merges two observations of the same aircraft, keeping the richest fields. */
+/** Merges two observations, using telemetry from the newest observation only. */
 export function mergeAircraft(base: Aircraft, incoming: Aircraft): Aircraft {
-  const merged: Aircraft = { ...base }
-  for (const [key, value] of Object.entries(incoming)) {
+  const [older, newer] = incoming.observedAt < base.observedAt ? [incoming, base] : [base, incoming]
+  const merged: Aircraft = { ...older }
+  for (const [key, value] of Object.entries(newer)) {
     if (value === undefined || value === null || value === '') continue
-    const current = (merged as unknown as Record<string, unknown>)[key]
-    if (current === undefined || current === null || current === '') {
-      ;(merged as unknown as Record<string, unknown>)[key] = value
-    }
+    ;(merged as unknown as Record<string, unknown>)[key] = value
   }
-  // The newest telemetry always wins.
-  merged.lat = incoming.lat
-  merged.lon = incoming.lon
-  merged.altitude = incoming.altitude
-  merged.groundSpeed = incoming.groundSpeed
-  merged.heading = incoming.heading
-  merged.verticalRate = incoming.verticalRate
-  merged.onGround = incoming.onGround
-  merged.observedAt = Math.max(base.observedAt, incoming.observedAt)
+  merged.lat = newer.lat
+  merged.lon = newer.lon
+  merged.altitude = newer.altitude
+  merged.groundSpeed = newer.groundSpeed
+  merged.heading = newer.heading
+  merged.verticalRate = newer.verticalRate
+  merged.onGround = newer.onGround
+  merged.observedAt = newer.observedAt
   return merged
 }
 

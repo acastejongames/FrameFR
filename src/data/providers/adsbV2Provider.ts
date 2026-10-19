@@ -191,6 +191,10 @@ export function normalizeV2Aircraft(
   const type = (raw.t ?? raw.type ?? '').trim() || undefined
   const groundSpeed = Math.round(raw.gs ?? raw.tas ?? raw.ias ?? 0)
 
+  const ageSeconds = typeof raw.seen === 'number' && Number.isFinite(raw.seen)
+    ? Math.min(300, Math.max(0, raw.seen))
+    : 0
+
   const aircraft: Aircraft = {
     id: hex,
     callsign,
@@ -211,7 +215,7 @@ export function normalizeV2Aircraft(
     onGround,
     squawk: raw.squawk,
     emergency: raw.emergency,
-    observedAt,
+    observedAt: Math.max(0, observedAt - ageSeconds * 1000),
     sourceId,
   }
 

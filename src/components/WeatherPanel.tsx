@@ -1,4 +1,3 @@
-import { forecastImage } from '@/data/weather/raster'
 import {
   CloudSun,
   CloudRain,
@@ -9,20 +8,31 @@ import {
   CircleOff,
   ChevronUp,
 } from 'lucide-react'
-import { ToolPopover } from './ToolPopover'
 import { useEffect, useRef, useState } from 'react'
-import type { Map } from 'maplibre-gl'
+import type { ImageSource, Map as MapLibreMap, RasterTileSource } from 'maplibre-gl'
 import {
+  FORECAST_TTL_MS,
   WEATHER_MODES,
-  fetchForecast,
-  latestRadar,
-  weatherGrid,
+  fetchForecastGrid,
+  fetchLatestRadar,
+  getCachedForecastGrid,
+  sectorForViewport,
+  sectorSafelyCovers,
+  type ForecastGrid,
+  type ForecastMode,
+  type WeatherBounds,
   type WeatherMode,
 } from '@/data/weather'
+import { rasterizeForecast } from '@/data/weather/raster'
 import { AIRCRAFT_LAYER, TRAIL_GLOW_LAYER } from '@/map/aircraftLayers'
+import { ToolPopover } from './ToolPopover'
 
-const SOURCE = 'aeroscope-weather'
-const LAYER = 'aeroscope-weather-fill'
+const FORECAST_SOURCE = 'aeroscope-weather-forecast'
+const FORECAST_LAYER = 'aeroscope-weather-forecast-layer'
+const RADAR_SOURCE = 'aeroscope-weather-radar'
+const RADAR_LAYER = 'aeroscope-weather-radar-layer'
+const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='
+
 const LEGENDS: Record<WeatherMode, string> = {
   none: '',
   radar: 'Radar observado · cobertura variable. Sin eco no significa sin lluvia.',
@@ -32,14 +42,16 @@ const LEGENDS: Record<WeatherMode, string> = {
   storm: 'Rojo: código WMO ≥ 95 (tormenta). No son rayos observados.',
 }
 
-/** Weather lifecycle is independent of aircraft polling and rendering. */
+const utcTime = (timestamp: number): string => new Date(timestamp).toISOString().slice(11, 16)
+
+/** Weather is sampled in stable sectors and never blocks aircraft updates. */
 export function WeatherPanel({
   map,
   open,
   onToggle,
   onClose,
 }: {
-  map: Map | null
+  map: MapLibreMap | null
   open: boolean
   onToggle: () => void
   onClose: () => void
@@ -47,122 +59,327 @@ export function WeatherPanel({
   const [mode, setMode] = useState<WeatherMode>('none')
   const [opacity, setOpacity] = useState(0.45)
   const [status, setStatus] = useState('')
+  const modeRef = useRef(mode)
+  modeRef.current = mode
   const opacityRef = useRef(opacity)
   opacityRef.current = opacity
+  const updateRef = useRef<(() => void) | null>(null)
+  const forecastRef = useRef<ForecastGrid | null>(null)
+  const radarRef = useRef<{ path: string; time: number } | null>(null)
+  const imageCacheRef = useRef(new Map<string, ImageData>())
+
   useEffect(() => {
-    const layer = map?.getLayer(LAYER)
-    if (layer)
-      map?.setPaintProperty(
-        LAYER,
-        'raster-opacity',
-        opacity,
-      )
+    if (!map) return
+    for (const layer of [FORECAST_LAYER, RADAR_LAYER]) {
+      if (map.getLayer(layer)) map.setPaintProperty(layer, 'raster-opacity', opacity)
+    }
   }, [map, opacity])
 
   useEffect(() => {
-    if (!map || mode === 'none') {
-      setStatus('')
+    if (!map) {
+      updateRef.current = null
       return
     }
+
     let disposed = false
+    let generation = 0
+    let failures = 0
+    let renderedForecastKey = ''
+    let appliedRadarPath = ''
     let request: AbortController | undefined
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
     let debounce: ReturnType<typeof setTimeout> | undefined
-    const clear = () => {
-      if (map.getLayer(LAYER)) map.removeLayer(LAYER)
-      if (map.getSource(SOURCE)) map.removeSource(SOURCE)
+
+    const removeLayerAndSource = (layer: string, source: string): void => {
+      try {
+        if (map.getLayer(layer)) map.removeLayer(layer)
+        if (map.getSource(source)) map.removeSource(source)
+      } catch {
+        // The map may already be tearing down; MapLibre owns that cleanup.
+      }
     }
-    const update = async () => {
-      if (disposed || !map.getLayer(AIRCRAFT_LAYER) || document.hidden) return
+
+    const setVisibility = (layer: string, visible: boolean): void => {
+      if (map.getLayer(layer)) map.setLayoutProperty(layer, 'visibility', visible ? 'visible' : 'none')
+    }
+
+    const beforeLayer = (): string | undefined =>
+      map.getLayer(TRAIL_GLOW_LAYER)
+        ? TRAIL_GLOW_LAYER
+        : map.getLayer(AIRCRAFT_LAYER)
+          ? AIRCRAFT_LAYER
+          : undefined
+
+    const renderForecast = (grid: ForecastGrid, selected: ForecastMode): boolean => {
+      const key = `${grid.sector.key}:${grid.fetchedAt}:${selected}`
+      const existing = map.getSource(FORECAST_SOURCE) as ImageSource | undefined
+      if (existing && map.getLayer(FORECAST_LAYER) && renderedForecastKey === key) {
+        setVisibility(FORECAST_LAYER, true)
+        return true
+      }
+
+      let image = imageCacheRef.current.get(key)
+      if (!image) {
+        const raster = rasterizeForecast(grid, selected)
+        image = new ImageData(raster.pixels, raster.width, raster.height)
+        imageCacheRef.current.set(key, image)
+        while (imageCacheRef.current.size > 4) {
+          imageCacheRef.current.delete(imageCacheRef.current.keys().next().value!)
+        }
+      }
+      const { west, south, east, north } = grid.sector
+      const coordinates = [[west, north], [east, north], [east, south], [west, south]] as [
+        [number, number],
+        [number, number],
+        [number, number],
+        [number, number],
+      ]
+
+      let source = existing
+      if (!source) {
+        map.addSource(FORECAST_SOURCE, { type: 'image', url: TRANSPARENT_PIXEL, coordinates })
+        source = map.getSource(FORECAST_SOURCE) as ImageSource
+      }
+      if (!map.getLayer(FORECAST_LAYER)) {
+        map.addLayer(
+          {
+            id: FORECAST_LAYER,
+            type: 'raster',
+            source: FORECAST_SOURCE,
+            paint: {
+              'raster-opacity': opacityRef.current,
+              'raster-resampling': 'linear',
+              'raster-fade-duration': 0,
+            },
+          },
+          beforeLayer(),
+        )
+      }
+      source.updateImage({ image, coordinates })
+      renderedForecastKey = key
+      setVisibility(FORECAST_LAYER, true)
+      return true
+    }
+
+    const renderRadar = (radar: { path: string; time: number }): void => {
+      const tiles = [`https://tilecache.rainviewer.com${radar.path}/256/{z}/{x}/{y}/2/1_1.png`]
+      let source = map.getSource(RADAR_SOURCE) as RasterTileSource | undefined
+      if (!source) {
+        map.addSource(RADAR_SOURCE, {
+          type: 'raster',
+          tiles,
+          tileSize: 256,
+          maxzoom: 7,
+          attribution: '<a href="https://www.rainviewer.com/">RainViewer</a>',
+        })
+        source = map.getSource(RADAR_SOURCE) as RasterTileSource
+        appliedRadarPath = radar.path
+      } else if (appliedRadarPath !== radar.path) {
+        source.setTiles(tiles)
+        appliedRadarPath = radar.path
+      }
+      if (!map.getLayer(RADAR_LAYER)) {
+        map.addLayer(
+          {
+            id: RADAR_LAYER,
+            type: 'raster',
+            source: RADAR_SOURCE,
+            paint: { 'raster-opacity': opacityRef.current, 'raster-fade-duration': 0 },
+          },
+          beforeLayer(),
+        )
+      }
+      setVisibility(RADAR_LAYER, true)
+    }
+
+    const restore = (): void => {
+      const selected = modeRef.current
+      if (selected === 'none') {
+        setVisibility(FORECAST_LAYER, false)
+        setVisibility(RADAR_LAYER, false)
+      } else if (selected === 'radar') {
+        setVisibility(FORECAST_LAYER, false)
+        if (radarRef.current) renderRadar(radarRef.current)
+      } else {
+        setVisibility(RADAR_LAYER, false)
+        if (forecastRef.current) renderForecast(forecastRef.current, selected)
+      }
+    }
+
+    const scheduleRetry = (): void => {
+      failures++
+      clearTimeout(retryTimer)
+      const delay = Math.min(120_000, 5_000 * 2 ** Math.min(5, failures - 1))
+      retryTimer = setTimeout(() => void update(), delay)
+    }
+
+    const beginRequest = (): { generation: number; signal: AbortSignal } => {
+      generation++
       request?.abort()
       const controller = new AbortController()
       request = controller
-      const timeout = setTimeout(() => controller.abort(), 15_000)
-      setStatus('Cargando meteorología…')
-      try {
-        let radar: { path: string; time: number } | undefined
-        let data
-        if (mode === 'radar') {
-          const response = await fetch('https://api.rainviewer.com/public/weather-maps.json', {
-            signal: controller.signal,
-          })
-          if (!response.ok) throw new Error(`RainViewer: HTTP ${response.status}`)
-          radar = latestRadar(await response.json())
-        } else {
-          const bounds = map.getBounds()
-          data = await fetchForecast(
-            weatherGrid(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()),
-            mode,
-            controller.signal,
-          )
-        }
-        if (disposed || controller.signal.aborted || !map.getLayer(AIRCRAFT_LAYER)) return
-        clear()
-        const before = map.getLayer(TRAIL_GLOW_LAYER)
-          ? TRAIL_GLOW_LAYER
-          : map.getLayer(AIRCRAFT_LAYER)
-            ? AIRCRAFT_LAYER
-            : undefined
-        if (radar) {
-          map.addSource(SOURCE, {
-            type: 'raster',
-            tiles: [`https://tilecache.rainviewer.com${radar.path}/256/{z}/{x}/{y}/2/1_1.png`],
-            tileSize: 256,
-            maxzoom: 7,
-            attribution: '<a href="https://www.rainviewer.com/">RainViewer</a>',
-          })
-          map.addLayer(
-            {
-              id: LAYER,
-              type: 'raster',
-              source: SOURCE,
-              paint: { 'raster-opacity': opacityRef.current },
-            },
-            before,
-          )
-          setStatus(`Radar · ${new Date(radar.time * 1000).toISOString().slice(11, 16)} UTC`)
-        } else if (data) {
-          const image = forecastImage(data, mode as Exclude<WeatherMode, 'none' | 'radar'>)
-          map.addSource(SOURCE, { type: 'image', ...image })
-          map.addLayer({ id: LAYER, type: 'raster', source: SOURCE,
-            paint: { 'raster-opacity': opacityRef.current, 'raster-resampling': 'linear', 'raster-fade-duration': 0 } }, before)
-          setStatus('Open-Meteo · modelo interpolado · no añade precisión a los datos')
-        }
-      } catch (error) {
-        if (disposed || request !== controller) return
-        clear()
-        setStatus(
-          controller.signal.aborted
-            ? 'Tiempo de espera agotado; se reintentará.'
-            : `${error instanceof Error ? error.message : 'Error meteorológico'}. Se reintentará.`,
-        )
-      } finally {
-        clearTimeout(timeout)
+      const timeout = setTimeout(() => controller.abort(), 20_000)
+      controller.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
+      return { generation, signal: controller.signal }
+    }
+
+    const bounds = (): WeatherBounds => {
+      const value = map.getBounds()
+      return {
+        west: value.getWest(),
+        south: value.getSouth(),
+        east: value.getEast(),
+        north: value.getNorth(),
       }
     }
-    const schedule = () => {
-      request?.abort()
+
+    const forecastStatus = (grid: ForecastGrid, selected: ForecastMode): void => {
+      const hasData = grid.values[selected].some((value) => value !== undefined)
+      setStatus(
+        hasData
+          ? `Open-Meteo · actualizado ${utcTime(grid.fetchedAt)} UTC`
+          : 'Open-Meteo no ha devuelto datos para esta capa en el sector.',
+      )
+    }
+
+    async function update(): Promise<void> {
+      if (disposed || document.hidden) return
+      const selected = modeRef.current
+      clearTimeout(retryTimer)
+
+      if (selected === 'none') {
+        generation++
+        request?.abort()
+        restore()
+        setStatus('')
+        return
+      }
+
+      if (selected === 'radar') {
+        setVisibility(FORECAST_LAYER, false)
+        if (radarRef.current) renderRadar(radarRef.current)
+        else setStatus('Cargando radar…')
+        const call = beginRequest()
+        try {
+          const radar = await fetchLatestRadar(call.signal)
+          if (disposed || call.generation !== generation || modeRef.current !== 'radar') return
+          radarRef.current = radar
+          failures = 0
+          renderRadar(radar)
+          setStatus(`Radar · ${utcTime(radar.time * 1000)} UTC`)
+        } catch (error) {
+          if (disposed || call.generation !== generation || call.signal.aborted) return
+          setStatus(
+            radarRef.current
+              ? 'No se pudo actualizar el radar; se mantiene la última imagen.'
+              : `${error instanceof Error ? error.message : 'Error de radar'}. Reintentando…`,
+          )
+          scheduleRetry()
+        }
+        return
+      }
+
+      setVisibility(RADAR_LAYER, false)
+      const view = bounds()
+      const current = forecastRef.current
+      if (current) {
+        renderForecast(current, selected)
+        const viewWidth = Math.min(360, view.east - view.west > 0 ? view.east - view.west : view.east - view.west + 360)
+        const viewHeight = Math.max(0.001, view.north - view.south)
+        const sectorWidth = current.sector.east - current.sector.west
+        const sectorHeight = current.sector.north - current.sector.south
+        const fresh = Date.now() - current.fetchedAt <= FORECAST_TTL_MS
+        const covered = sectorSafelyCovers(current.sector, view)
+        const tooCoarse = sectorWidth / viewWidth > 4 || sectorHeight / viewHeight > 4
+        if (fresh && covered && !tooCoarse) {
+          failures = 0
+          forecastStatus(current, selected)
+          return
+        }
+      }
+
+      const sector = sectorForViewport(view)
+      if (!sector) {
+        setStatus('Sector fuera de la cobertura del modelo.')
+        return
+      }
+      const cached = getCachedForecastGrid(sector)
+      if (cached && cached !== current) {
+        forecastRef.current = cached
+        renderForecast(cached, selected)
+        forecastStatus(cached, selected)
+        return
+      }
+      if (!current) setStatus('Cargando meteorología…')
+      else setStatus('Actualizando el sector; se mantiene la capa anterior…')
+
+      const call = beginRequest()
+      try {
+        const grid = await fetchForecastGrid(sector, call.signal)
+        if (disposed || call.generation !== generation) return
+        const active = modeRef.current
+        if (active === 'none' || active === 'radar') return
+        forecastRef.current = grid
+        failures = 0
+        renderForecast(grid, active)
+        forecastStatus(grid, active)
+      } catch (error) {
+        if (disposed || call.generation !== generation || call.signal.aborted) return
+        setStatus(
+          forecastRef.current
+            ? 'No se pudo actualizar; se mantiene la última capa válida.'
+            : `${error instanceof Error ? error.message : 'Error meteorológico'}. Reintentando…`,
+        )
+        scheduleRetry()
+      }
+    }
+
+    const schedule = (): void => {
       clearTimeout(debounce)
       debounce = setTimeout(() => void update(), 700)
     }
-    const visibility = () => {
-      if (!document.hidden) schedule()
-      else request?.abort()
+    const handleStyleLoad = (): void => {
+      renderedForecastKey = ''
+      appliedRadarPath = ''
+      restore()
+      schedule()
     }
-    map.on('style.load', schedule)
-    if (mode !== 'radar') map.on('moveend', schedule)
-    document.addEventListener('visibilitychange', visibility)
+    const handleVisibility = (): void => {
+      if (document.hidden) {
+        generation++
+        request?.abort()
+        clearTimeout(debounce)
+        clearTimeout(retryTimer)
+      } else {
+        schedule()
+      }
+    }
+
+    updateRef.current = () => void update()
+    map.on('style.load', handleStyleLoad)
+    map.on('moveend', schedule)
+    document.addEventListener('visibilitychange', handleVisibility)
     const interval = setInterval(() => void update(), 300_000)
-    void update()
+    restore()
+
     return () => {
       disposed = true
+      generation++
       request?.abort()
       clearTimeout(debounce)
+      clearTimeout(retryTimer)
       clearInterval(interval)
-      map.off('style.load', schedule)
+      map.off('style.load', handleStyleLoad)
       map.off('moveend', schedule)
-      document.removeEventListener('visibilitychange', visibility)
-      clear()
+      document.removeEventListener('visibilitychange', handleVisibility)
+      if (updateRef.current) updateRef.current = null
+      removeLayerAndSource(FORECAST_LAYER, FORECAST_SOURCE)
+      removeLayerAndSource(RADAR_LAYER, RADAR_SOURCE)
     }
+  }, [map])
+
+  useEffect(() => {
+    updateRef.current?.()
   }, [map, mode])
 
   const icons = {
@@ -189,6 +406,7 @@ export function WeatherPanel({
     rain: 'Precipitación',
     storm: 'Tormentas',
   }
+
   return (
     <ToolPopover
       id="weather-tools"
@@ -209,9 +427,7 @@ export function WeatherPanel({
         >
           <CloudSun size={20} />
           <span className="dock-label-wide">Meteorología</span>
-          <span className="dock-label-small" aria-hidden="true">
-            Tiempo
-          </span>
+          <span className="dock-label-small" aria-hidden="true">Tiempo</span>
           <ChevronUp size={13} className="dock-chevron" />
           {mode !== 'none' && <i className="tool-active-dot" />}
         </button>
@@ -251,7 +467,7 @@ export function WeatherPanel({
             max="0.8"
             step="0.1"
             value={opacity}
-            onChange={(e) => setOpacity(Number(e.target.value))}
+            onChange={(event) => setOpacity(Number(event.target.value))}
           />
           <p className="weather-status" role="status">
             {map ? status : 'Esperando al mapa…'}
@@ -263,7 +479,9 @@ export function WeatherPanel({
           Elige una capa para explorar el tiempo sin perder de vista los vuelos.
         </p>
       )}
-      <div className="tool-footnote">Información orientativa. No usar para navegación aérea.</div>
+      <div className="tool-footnote">
+        Información orientativa. No usar para navegación aérea. Open-Meteo · CC BY 4.0.
+      </div>
     </ToolPopover>
   )
 }

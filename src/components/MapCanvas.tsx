@@ -5,10 +5,11 @@ import type { ProviderId } from '@/data/registry'
 import { FleetController, type FleetFilters } from '@/engine/fleetController'
 import { AIRCRAFT_LAYER, addAircraftLayers, setLabelsVisible, setTrailVisible } from '@/map/aircraftLayers'
 import {
-  captureBasemapNames,
+  captureBasemapLayers,
   getBasemap,
-  setBasemapNamesVisible,
+  setBasemapLayerVisibility,
   type BasemapId,
+  type BasemapLayerVisibility,
 } from '@/map/style'
 import { formatAltitude, formatSpeed } from '@/lib/format'
 
@@ -24,18 +25,16 @@ interface MapCanvasProps {
   filters: FleetFilters
   selectedId: string | null
   follow: boolean
-  followZoom: number
   maxAircraft: number
   pollIntervalMs: number
   labels: boolean
   trail: boolean
   basemap: BasemapId
-  basemapNames: boolean
+  basemapLayers: BasemapLayerVisibility
   is3D: boolean
   onReady: (handle: MapCanvasHandle | null) => void
   onSelect: (id: string | null) => void
   onFollowChange: (follow: boolean) => void
-  onZoomChange: (zoom: number) => void
   onError: (message: string | null) => void
 }
 
@@ -56,18 +55,16 @@ export function MapCanvas({
   filters,
   selectedId,
   follow,
-  followZoom,
   maxAircraft,
   pollIntervalMs,
   labels,
   trail,
   basemap,
-  basemapNames,
+  basemapLayers,
   is3D,
   onReady,
   onSelect,
   onFollowChange,
-  onZoomChange,
   onError,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -84,15 +81,13 @@ export function MapCanvas({
     labels,
     trail,
     basemap,
-    basemapNames,
+    basemapLayers,
     is3D,
-    followZoom,
     maxAircraft,
     pollIntervalMs,
     onReady,
     onSelect,
     onFollowChange,
-    onZoomChange,
     onError,
   })
   const [ready, setReady] = useState(false)
@@ -106,16 +101,14 @@ export function MapCanvas({
       labels,
       trail,
       basemap,
-      basemapNames,
+      basemapLayers,
       is3D,
-      followZoom,
-      maxAircraft,
+        maxAircraft,
       pollIntervalMs,
       onReady,
       onSelect,
       onFollowChange,
-      onZoomChange,
-      onError,
+        onError,
     }
   })
 
@@ -148,7 +141,7 @@ export function MapCanvas({
       addAircraftLayers(map)
       setLabelsVisible(map, latest.current.labels)
       setTrailVisible(map, latest.current.trail)
-      captureBasemapNames(map, latest.current.basemapNames)
+      captureBasemapLayers(map, latest.current.basemapLayers)
       controllerRef.current?.restoreStyle()
     }
 
@@ -161,7 +154,6 @@ export function MapCanvas({
         filters: latest.current.filters,
         onFollowChange: (value) => latest.current.onFollowChange(value),
       })
-      controller.setFollowZoom(latest.current.followZoom)
       controller.setMaxAircraft(latest.current.maxAircraft)
       controller.setPollInterval(latest.current.pollIntervalMs)
       controller.start()
@@ -222,11 +214,6 @@ export function MapCanvas({
       })
     }
 
-    // Keep the "seguimiento" slider in sync with the real zoom level.
-    const handleZoom = () => {
-      latest.current.onZoomChange(map.getZoom())
-    }
-
     map.on('style.load', handleStyleLoad)
     map.on('load', handleLoad)
     map.on('error', handleError)
@@ -235,7 +222,6 @@ export function MapCanvas({
     map.on('mouseenter', AIRCRAFT_LAYER, handleEnter)
     map.on('mousemove', AIRCRAFT_LAYER, handleMove)
     map.on('mouseleave', AIRCRAFT_LAYER, handleLeave)
-    map.on('zoom', handleZoom)
 
     return () => {
       controllerRef.current?.destroy()
@@ -255,10 +241,6 @@ export function MapCanvas({
   useEffect(() => {
     controllerRef.current?.setFollow(follow)
   }, [follow, ready])
-
-  useEffect(() => {
-    controllerRef.current?.setFollowZoom(followZoom)
-  }, [followZoom, ready])
 
   useEffect(() => {
     controllerRef.current?.setMaxAircraft(maxAircraft)
@@ -293,8 +275,8 @@ export function MapCanvas({
   }, [trail, ready])
 
   useEffect(() => {
-    if (mapRef.current) setBasemapNamesVisible(mapRef.current, basemapNames)
-  }, [basemapNames, ready])
+    if (mapRef.current) setBasemapLayerVisibility(mapRef.current, basemapLayers)
+  }, [basemapLayers, ready])
 
   useEffect(() => {
     const map = mapRef.current

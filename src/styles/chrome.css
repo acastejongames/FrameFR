@@ -737,3 +737,13 @@ body.ui-clean-mode .ui-overlay { visibility: hidden !important; pointer-events: 
   .status-legend { gap: 8px; font-size: 9px; }
   .weather-option { flex-direction: column; }
 }
+
+.map-layer-toggles { margin-top: 18px; border-top: 1px solid #ffffff10; padding-top: 16px; }
+.map-layer-toggles h3 { margin: 0 0 10px; font-size: 13px; }
+.map-layer-toggle { width: 100%; display: flex; align-items: center; gap: 11px; padding: 10px 12px; margin-top: 7px; border: 1px solid #ffffff0f; border-radius: 11px; background: #ffffff05; color: #cbd5e1; text-align: left; }
+.map-layer-toggle[aria-pressed='true'] { border-color: #ffbe0045; background: #ffbe0011; color: #ffd158; }
+.map-layer-toggle > span:nth-child(2) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.map-layer-toggle strong { font-size: 12px; }
+.map-layer-toggle small { font-size: 10px; color: #8d99aa; line-height: 1.35; }
+.map-layer-toggle .toggle-state { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.map-layer-note { margin: 10px 2px 0; font-size: 10px; line-height: 1.45; color: #7f8b9c; }

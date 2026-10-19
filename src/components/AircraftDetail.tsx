@@ -14,11 +14,9 @@ interface AircraftDetailProps {
   trailAltitudes: number[]
   follow: boolean
   is3D: boolean
-  trackingZoom: number
   onClose: () => void
   onFollowChange: (follow: boolean) => void
   on3DChange: (is3D: boolean) => void
-  onTrackingZoomChange: (zoom: number) => void
   onClearTrail: () => void
   onCenter: () => void
 }
@@ -56,11 +54,9 @@ export function AircraftDetail({
   trailAltitudes,
   follow,
   is3D,
-  trackingZoom,
   onClose,
   onFollowChange,
   on3DChange,
-  onTrackingZoomChange,
   onClearTrail,
   onCenter,
 }: AircraftDetailProps) {
@@ -307,59 +303,6 @@ export function AircraftDetail({
           >
             <Crosshair className="h-3 w-3 text-accent" />
             Centrar en el mapa
-          </button>
-        </div>
-      </div>
-
-      {/* Tracking zoom */}
-      <div className="shrink-0 border-t border-white/[0.07] bg-[#181c22] px-2.5 py-2">
-        <div className="mb-1.5 flex items-center justify-between text-[10px]">
-          <span className="flex items-center gap-1 font-semibold uppercase text-white/40">
-            <Crosshair className="h-3 w-3 text-accent" />
-            Zoom de seguimiento
-          </span>
-          <div className="flex items-center gap-1">
-            {[6.8, 9.5, 13.2].map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => onTrackingZoomChange(preset)}
-                className="tech rounded border border-white/[0.09] bg-ink-700 px-1.5 py-0.5 text-[9px] text-white/60 transition hover:bg-ink-600"
-              >
-                {preset === 6.8 ? 'Ruta' : preset === 9.5 ? 'Aprox' : 'Pista'}
-              </button>
-            ))}
-            <span className="tech ml-1 min-w-[34px] text-right font-bold text-accent">
-              {trackingZoom.toFixed(1)}x
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => onTrackingZoomChange(trackingZoom - 0.8)}
-            className="tech h-6 w-6 shrink-0 rounded border border-white/[0.09] bg-ink-700 font-bold text-white/70 transition hover:bg-ink-600"
-            aria-label="Alejar zoom"
-          >
-            −
-          </button>
-          <input
-            type="range"
-            min={4}
-            max={15.5}
-            step={0.1}
-            value={trackingZoom}
-            onChange={(event) => onTrackingZoomChange(Number.parseFloat(event.target.value))}
-            className="h-1.5 w-full cursor-pointer appearance-none rounded bg-[#0f1216]"
-            aria-label="Zoom de seguimiento"
-          />
-          <button
-            type="button"
-            onClick={() => onTrackingZoomChange(trackingZoom + 0.8)}
-            className="tech h-6 w-6 shrink-0 rounded border border-white/[0.09] bg-ink-700 font-bold text-white/70 transition hover:bg-ink-600"
-            aria-label="Acercar zoom"
-          >
-            +
           </button>
         </div>
       </div>

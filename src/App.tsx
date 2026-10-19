@@ -4,7 +4,6 @@ import {
   DEFAULT_GUI_VISIBILITY,
   DEFAULT_MAX_AIRCRAFT,
   DEFAULT_SORT_KEY,
-  DEFAULT_TRACKING_ZOOM,
   type GuiVisibility,
   type SortKey,
 } from '@/config'
@@ -17,7 +16,7 @@ import { ALL_CATEGORIES, type FleetFilters } from '@/engine/fleetController'
 import { useFleetSnapshot } from '@/hooks/useFleetSnapshot'
 import { useGlobalSearch } from '@/hooks/useGlobalSearch'
 import { usePersistentState } from '@/hooks/usePersistentState'
-import { DEFAULT_BASEMAP, type BasemapId } from '@/map/style'
+import { DEFAULT_BASEMAP, DEFAULT_BASEMAP_LAYERS, type BasemapId, type BasemapLayerVisibility } from '@/map/style'
 import { AircraftDetail } from '@/components/AircraftDetail'
 import { AirportHubs } from '@/components/AirportHubs'
 import { HubsManager } from '@/components/HubsManager'
@@ -48,6 +47,15 @@ export default function App() {
   )
   const [basemap, setBasemap] = usePersistentState<BasemapId>('basemap', DEFAULT_BASEMAP)
   const [showLabels, setShowLabels] = usePersistentState<boolean>('labels', true)
+  const [mapLayers, setMapLayers] = usePersistentState<BasemapLayerVisibility>(
+    'map-layers',
+    DEFAULT_BASEMAP_LAYERS,
+    (value): value is BasemapLayerVisibility =>
+      typeof value === 'object' && value !== null &&
+      typeof (value as BasemapLayerVisibility).placeIcons === 'boolean' &&
+      typeof (value as BasemapLayerVisibility).names === 'boolean' &&
+      typeof (value as BasemapLayerVisibility).borders === 'boolean',
+  )
   const [gui, setGui] = usePersistentState<GuiVisibility>('gui', DEFAULT_GUI_VISIBILITY)
   const [sortBy, setSortBy] = usePersistentState<SortKey>('sort', DEFAULT_SORT_KEY)
   const [hubItems, setHubItems] = usePersistentState<HubItem[]>('hubs', loadHubItems)
@@ -60,7 +68,6 @@ export default function App() {
   const [speedFactor] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [follow, setFollow] = useState(false)
-  const [trackingZoom, setTrackingZoom] = useState(DEFAULT_TRACKING_ZOOM)
   const [is3D, setIs3D] = useState(false)
   const [cleanMode, setCleanMode] = useState(false)
   const [tableOpen, setTableOpen] = useState(false)
@@ -220,23 +227,17 @@ export default function App() {
     showToast('Actualizando sector ADS-B…')
   }, [handle, showToast])
 
-  const handleTrackingZoom = useCallback((zoom: number) => {
-    setTrackingZoom(zoom)
-    handle?.map.easeTo({ zoom, duration: 300 })
-  }, [handle])
-
   const handleFollowChange = useCallback(
     (value: boolean) => {
       setFollow(value)
       if (value && selected) {
         handle?.map.easeTo({
           center: [selected.lon, selected.lat],
-          zoom: trackingZoom,
           duration: 800,
         })
       }
     },
-    [handle, selected, trackingZoom],
+    [handle, selected],
   )
 
   const handleLocate = useCallback(() => {
@@ -278,18 +279,16 @@ export default function App() {
         filters={filters}
         selectedId={selectedId}
         follow={follow}
-        followZoom={trackingZoom}
         maxAircraft={maxAircraft}
         pollIntervalMs={pollIntervalMs}
         labels={showLabels}
         trail
         basemap={basemap}
-        basemapNames
+        basemapLayers={mapLayers}
         is3D={is3D}
         onReady={setHandle}
         onSelect={handleSelect}
         onFollowChange={setFollow}
-        onZoomChange={setTrackingZoom}
         onError={setMapError}
       />
 
@@ -336,11 +335,9 @@ export default function App() {
           trailAltitudes={trailAltitudes}
           follow={follow}
           is3D={is3D}
-          trackingZoom={trackingZoom}
           onClose={() => handleSelect(null)}
           onFollowChange={handleFollowChange}
           on3DChange={setIs3D}
-          onTrackingZoomChange={handleTrackingZoom}
           onClearTrail={() => {
             if (selectedId) handle?.controller.clearExternalTrail(selectedId)
             setTrailAltitudes([])
@@ -349,7 +346,6 @@ export default function App() {
           onCenter={() =>
             handle?.map.flyTo({
               center: [selected.lon, selected.lat],
-              zoom: trackingZoom,
               duration: 800,
               essential: true,
             })
@@ -397,6 +393,8 @@ export default function App() {
           map={handle?.map ?? null}
           basemap={basemap}
           onBasemapChange={setBasemap}
+          mapLayers={mapLayers}
+          onMapLayersChange={setMapLayers}
           showLabels={showLabels}
           onShowLabelsChange={setShowLabels}
           is3D={is3D}

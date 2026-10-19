@@ -21,9 +21,6 @@ export const GLYPHS_URL =
 /** Font stack requested from the glyph endpoint. */
 export const GLYPH_FONT = 'Noto Sans Regular'
 
-/** How often (ms) the rendered aircraft layer is refreshed. */
-export const RENDER_INTERVAL_MS = 70
-
 /** How often (ms) the React UI is refreshed with a new snapshot. */
 export const UI_INTERVAL_MS = 400
 
@@ -74,16 +71,6 @@ export const FLEET_SIZES = [250, 600, 1200] as const
 
 /** Simulation speed multipliers. */
 export const SPEED_FACTORS = [1, 2, 5] as const
-
-/** Zoom presets of the "seguimiento" slider of the detail panel. */
-export const TRACKING_ZOOM_PRESETS = [
-  { label: 'Ruta', zoom: 6.8 },
-  { label: 'Aprox', zoom: 9.5 },
-  { label: 'Pista', zoom: 13.2 },
-] as const
-
-/** Default zoom used when the camera follows an aircraft. */
-export const DEFAULT_TRACKING_ZOOM = 8.8
 
 /** Which panels of the interface can be hidden from the settings. */
 export interface GuiVisibility {

@@ -152,9 +152,9 @@ src/
 │     ├─ autoProvider.ts     #    Carrera multi-red y fusión
 │     └─ jsonp.ts            #    Transporte JSONP
 ├─ engine/
-│  └─ fleetController.ts     # Bucle de animación, interpolación y publicación
+│  └─ fleetController.ts     # Informes exactos, renderizado y publicación
 ├─ map/
-│  ├─ style.ts               #    Estilos de OpenFreeMap y nombres del mapa
+│  ├─ style.ts               #    Estilos y elementos del mapa base
 │  ├─ silhouettes.ts         #    Siluetas dibujadas en canvas
 │  ├─ aircraftIcons.ts       #    Selección de sprite por aeronave
 │  ├─ aircraftLayers.ts      #    Fuentes y capas de MapLibre
@@ -189,13 +189,13 @@ interface AircraftProvider {
 El proveedor sólo responde a *«¿qué ves ahora?»*. Del resto se encarga el
 motor:
 
-1. **`FleetController`** mantiene un `Track` por aeronave con sus dos últimas
-   posiciones.
-2. Entre sondeos **interpola** posición, altitud y rumbo, de modo que el
-   movimiento es fluido aunque el feed se actualice cada diez segundos.
-3. Empuja un GeoJSON a MapLibre **~14 veces por segundo** y una instantánea a
-   React **2 veces por segundo**, así la interfaz nunca se re-renderiza a
-   velocidad de animación.
+1. **`FleetController`** conserva por aeronave la observación aceptada más
+   reciente según su marca temporal.
+2. No interpola ni extrapola coordenadas: el icono permanece en la última
+   posición informada hasta que llega otro informe.
+3. Solo empuja GeoJSON a MapLibre cuando cambia un informe (descartando
+   instantáneas intermedias obsoletas) y publica en React unas dos veces por
+   segundo.
 
 **Añadir otro proveedor** consiste en crear una clase que implemente
 `AircraftProvider` y registrarla en `src/data/registry.ts`. Ni el motor ni la
@@ -220,11 +220,12 @@ El panel **Meteorología** añade:
 
 - Radar de lluvia observado de RainViewer, con hora UTC del fotograma.
 - Viento, temperatura, precipitación y códigos WMO de Open-Meteo.
-- Cuadrícula explícita de 5×5 celdas: **no es un mapa de alta resolución**.
-- Una petición por sector, debounce de 700 ms, caché acotada de 5 minutos,
-  cancelación al cambiar de capa, timeout de 15 s y limpieza al desmontar.
-- Opacidad sin nuevas peticiones; actualización cada 5 minutos y al mover
-  el mapa para los datos de modelo. No se solicitan datos con la pestaña oculta.
+- Sectores geográficos estables con una rejilla de modelo 11×9: **no es un
+  mapa de alta resolución** y el degradado no añade precisión.
+- Una petición obtiene las cuatro variables del sector. Cambiar de capa,
+  hacer zoom dentro del sector o cambiar de estilo no vuelve a pedir datos.
+- Caché LRU de sectores, última capa válida durante reintentos con backoff,
+  debounce tras mover el mapa y pausa con la pestaña oculta.
 - Capas por debajo de las aeronaves, reconstruidas al cambiar de cartografía.
 
 Diferencias deliberadas respecto al HTML: no se reproducen las partículas de

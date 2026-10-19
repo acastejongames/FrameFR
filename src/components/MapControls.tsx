@@ -10,9 +10,12 @@ import {
   Sun,
   Mountain,
   Check,
+  MapPin,
+  Type,
+  Landmark,
 } from 'lucide-react'
 import type { Map } from 'maplibre-gl'
-import { BASEMAPS, type BasemapId } from '@/map/style'
+import { BASEMAPS, type BasemapId, type BasemapLayerVisibility } from '@/map/style'
 import { ToolPopover } from './ToolPopover'
 import { WeatherPanel } from './WeatherPanel'
 
@@ -20,6 +23,8 @@ interface MapControlsProps {
   map: Map | null
   basemap: BasemapId
   onBasemapChange: (id: BasemapId) => void
+  mapLayers: BasemapLayerVisibility
+  onMapLayersChange: (value: BasemapLayerVisibility) => void
   showLabels: boolean
   onShowLabelsChange: (value: boolean) => void
   is3D: boolean
@@ -37,6 +42,8 @@ export function MapControls({
   map,
   basemap,
   onBasemapChange,
+  mapLayers,
+  onMapLayersChange,
   showLabels,
   onShowLabelsChange,
   is3D,
@@ -94,6 +101,27 @@ export function MapControls({
               <span>{style.label}</span>
             </button>
           ))}
+        </div>
+        <div className="map-layer-toggles" role="group" aria-label="Elementos del mapa base">
+          <h3>Elementos del mapa</h3>
+          {([
+            ['placeIcons', 'Iconos de lugares', 'Pines, puntos de población y POI', MapPin],
+            ['names', 'Nombres', 'Ciudades, países, vías y masas de agua', Type],
+            ['borders', 'Fronteras', 'Límites administrativos', Landmark],
+          ] as const).map(([key, label, description, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              className="map-layer-toggle"
+              aria-pressed={mapLayers[key]}
+              onClick={() => onMapLayersChange({ ...mapLayers, [key]: !mapLayers[key] })}
+            >
+              <Icon size={18} />
+              <span><strong>{label}</strong><small>{description}</small></span>
+              <span className="toggle-state" aria-hidden="true">{mapLayers[key] ? 'Visible' : 'Oculto'}</span>
+            </button>
+          ))}
+          <p className="map-layer-note">Algunos estilos agrupan icono y texto; se oculta cada parte por separado cuando el estilo lo permite.</p>
         </div>
         <p className="tool-hint">La cartografía cambia; tus vuelos y capas se mantienen.</p>
       </ToolPopover>

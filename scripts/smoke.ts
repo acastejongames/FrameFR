@@ -3,7 +3,6 @@ nodeGlobals.requestAnimationFrame ??= () => 0
 nodeGlobals.cancelAnimationFrame ??= () => undefined
 import { sampleGrid, rasterizeForecast } from '../src/data/weather/raster'
 import { FleetController } from '../src/engine/fleetController'
-import type { Aircraft } from '../src/data/types'
 /**
  * Headless sanity check for the data layer.
  *
@@ -15,7 +14,8 @@ import type { Aircraft } from '../src/data/types'
  *
  * Run with:  npm run smoke
  */
-import { weatherGrid, normalizeForecast, latestRadar } from '../src/data/weather'
+import { forecastPoints, latestRadar, normalizeForecastGrid, sectorForViewport, sectorSafelyCovers } from '../src/data/weather'
+import { classifyBasemapLayer } from '../src/map/style'
 import { DemoProvider } from '../src/data/providers/demoProvider'
 import { distanceNm } from '../src/data/geo'
 import { resolveSearchIntent } from '../src/data/globalSearch'
@@ -229,6 +229,7 @@ console.log('· Fusión de observaciones de redes distintas…')
   check(merged.route?.destination === 'FRA', 'fusión: se ha perdido la ruta')
   check(merged.registration === 'D-AIHN', 'fusión: se ha perdido la matrícula')
   check(merged.lat === 40.5, 'fusión: la posición no es la más reciente')
+  check(mergeAircraft(incoming, base).lat === 40.5, 'fusión: una observación antigua no debe mover el avión atrás')
 }
 
 console.log('· Categorización de aeronaves…')
@@ -315,27 +316,43 @@ console.log('· Enriquecimiento con el código de aerolínea…')
   check(aircraft.flightNumber === 'FR1234', `vuelo: incorrecto (${aircraft.flightNumber})`)
 }
 
-/* Aircraft must survive a style swap: replacement source gets fresh data. */
+/* Aircraft render only exact reports and survive a style swap. */
 {
-  const sourceSets: Array<[string, number]> = []
-  const sources = ['old', 'fresh']
+  const sourceSets: Array<[string, number, number]> = []
   const fakeSources = new Map<string, { setData: (d: unknown) => Promise<void> }>()
-  for (const name of sources) fakeSources.set(name, {
-    setData: (data: unknown) => { sourceSets.push([name, (data as {features: unknown[]}).features.length]); return Promise.resolve() },
+  for (const name of ['old', 'fresh']) fakeSources.set(name, {
+    setData: (data: unknown) => {
+      const features = (data as { features: Array<{ geometry: { coordinates: number[] } }> }).features
+      sourceSets.push([name, features.length, features[0]?.geometry.coordinates[1] ?? NaN])
+      return Promise.resolve()
+    },
   })
   let active = 'old'
   const fakeMap = {
     getSource: () => fakeSources.get(active),
-    on: () => undefined, off: () => undefined, getBounds: () => ({ getCenter: () => ({lat: 40, lng: -3}) }),
-    getZoom: () => 6, getCenter: () => ({lat: 40, lng: -3}),
-  } as unknown as Parameters<typeof FleetController>[0] extends never ? never : import('maplibre-gl').Map
-  const controller = new FleetController({ map: fakeMap, providerId: 'simulated' as never, fleetSize: 5, filters: { query: '', categories: [], airborneOnly: false }, onFollowChange: () => undefined })
-  const base = { id: 'TEST1', callsign: 'TEST1', flightNumber: 'TEST1', registration: 'EC-TEST', aircraftType: 'B738', aircraftTypeDesc: undefined, category: 'airliner', silhouette: 'heavy', airlineIcao: undefined, airlineIata: undefined, country: 'ES', lat: 40, lon: -3, altitude: 30000, groundSpeed: 450, heading: 90, verticalSpeed: 0, onGround: false, squawk: undefined, lastSeen: 0 } as unknown as Aircraft
+    on: () => undefined, off: () => undefined,
+    getBounds: () => ({ getCenter: () => ({ lat: 40, lng: -3 }), getWest: () => -10, getSouth: () => 35, getEast: () => 5, getNorth: () => 45, getNorthEast: () => ({ lat: 45, lng: 5 }) }),
+    getZoom: () => 6, getCenter: () => ({ lat: 40, lng: -3 }),
+    jumpTo: () => undefined,
+  } as unknown as import('maplibre-gl').Map
+  const controller = new FleetController({ map: fakeMap, providerId: 'demo', fleetSize: 5, filters: { query: '', categories: [], airborneOnly: false }, onFollowChange: () => undefined })
+  const base = { id: 'test1', callsign: 'TEST1', flightNumber: 'TEST1', registration: 'EC-TEST', type: 'B738', category: 'commercial', silhouette: 'narrow2', lat: 40, lon: -3, altitude: 30000, groundSpeed: 450, verticalRate: 0, heading: 90, onGround: false, observedAt: 2000 } as unknown as Aircraft
   controller.upsertAircraft(base)
-  controller.upsertAircraft({ ...base, id: 'TEST2', lat: 41 })
-  const internals = controller as unknown as { pushData: (now?: number) => void }
+  controller.upsertAircraft({ ...base, id: 'test2', lat: 41 })
+  const internals = controller as unknown as { pushData: () => void; renderDirty: boolean }
   internals.pushData()
-  check(sourceSets.at(-1)?.[0] === 'old' && sourceSets.at(-1)?.[1] === 2, 'datos enviados a la fuente inicial')
+  check(sourceSets.at(-1)?.[0] === 'old' && sourceSets.at(-1)?.[1] === 2 && sourceSets.at(-1)?.[2] === 40, 'render: posición exacta del informe')
+  await Promise.resolve()
+  internals.renderDirty = false
+  controller.upsertAircraft({ ...base, lat: 50, observedAt: 1000 })
+  check(controller.positionOf('test1')?.lat === 40 && !internals.renderDirty, 'render: informe antiguo ignorado')
+  controller.upsertAircraft({ ...base, lat: 42, observedAt: 3000 })
+  check(internals.renderDirty && controller.positionOf('test1')?.lat === 42, 'render: sin coordenadas intermedias')
+  internals.pushData()
+  await Promise.resolve()
+  internals.renderDirty = false
+  controller.upsertAircraft({ ...base, lat: 42, observedAt: 4000 })
+  check(!internals.renderDirty, 'render: un informe idéntico no vuelve a enviar geometría')
   active = 'fresh'
   internals.pushData()
   check(sourceSets.at(-1)?.[0] === 'fresh' && sourceSets.at(-1)?.[1] === 2, 'fuente de repuesto recibe los aviones')
@@ -344,16 +361,23 @@ console.log('· Enriquecimiento con el código de aerolínea…')
   controller.destroy()
 }
 
-console.log('· Meteorología: cuadrícula, valores ausentes y validación de radar…')
+console.log('· Meteorología: sectores estables, valores ausentes y radar…')
 {
-  const cells = weatherGrid(170, -10, 190, 10)
-  check(cells.length === 49, 'meteorología: cuadrícula acotada')
-  check(cells.every(c => c.lon >= -180 && c.lon <= 180), 'meteorología: antimeridiano')
-  check(weatherGrid(0, 90, 1, 100).length === 0, 'meteorología: latitudes fuera del modelo')
-  check(weatherGrid(NaN, 0, 1, 1).length === 0, 'meteorología: coordenadas inválidas')
-  const data = normalizeForecast([{ current: { temperature_2m: 0 } }, { current: { temperature_2m: null } }], cells, 'temp')
-  check(data.features.length === 1 && data.features[0].properties?.value === 0, 'meteorología: conservar cero, omitir nulos')
-  check(normalizeForecast({}, cells, 'wind').features.length === 0, 'meteorología: no inventar datos')
+  const spain = sectorForViewport({ west: -12, south: 35, east: 5, north: 44 })!
+  const zoomed = sectorForViewport({ west: -6, south: 38, east: 0, north: 42 })!
+  check(Boolean(spain && zoomed), 'meteorología: sectores válidos')
+  check(sectorSafelyCovers(spain, { west: -6, south: 38, east: 0, north: 42 }), 'meteorología: acercar reutiliza el sector')
+  check(sectorForViewport({ west: -12.2, south: 35.2, east: 4.8, north: 43.8 })?.key === spain.key, 'meteorología: pequeños desplazamientos reutilizan caché')
+  const pacific = sectorForViewport({ west: 170, south: -10, east: 190, north: 10 })!
+  const points = forecastPoints(pacific)
+  check(points.length === 99 && points.every((point) => point.lon >= -180 && point.lon <= 180), 'meteorología: antimeridiano')
+  check(sectorForViewport({ west: 0, south: 90, east: 1, north: 100 }) === null, 'meteorología: latitudes fuera del modelo')
+  check(sectorForViewport({ west: NaN, south: 0, east: 1, north: 1 }) === null, 'meteorología: coordenadas inválidas')
+  const data = normalizeForecastGrid([{ current: { temperature_2m: 0 } }, { current: { temperature_2m: null } }], spain)
+  check(data.values.temp[0] === 0 && data.values.temp[1] === undefined, 'meteorología: conservar cero, omitir nulos')
+  check(normalizeForecastGrid({}, spain).values.wind.every((value) => value === undefined), 'meteorología: no inventar datos')
+  const allFields = normalizeForecastGrid(points.map((_, i) => ({ current: { temperature_2m: i % 11, wind_speed_10m: i, precipitation: 0, weather_code: 0 } })), pacific)
+  check(allFields.values.temp.some((value) => value !== undefined) && allFields.values.wind.some((value) => value !== undefined), 'meteorología: una respuesta alimenta todas las capas')
   check(latestRadar({ radar: { past: [{ path: '/v2/radar/123', time: 123 }] } }).time === 123, 'meteorología: radar válido')
   for (const payload of [{}, { radar: { past: [{ path: '//evil.test', time: 1 }] } }]) {
     let rejected = false
@@ -363,16 +387,30 @@ console.log('· Meteorología: cuadrícula, valores ausentes y validación de ra
 }
 
 {
-  check(sampleGrid([0,10,20,30], .5, .5, 2) === 15, 'interpolación bilineal continua')
-  check(sampleGrid([0,undefined,20,30], .5, .5, 2) === null, 'datos ausentes transparentes')
-  const cells = weatherGrid(-10, 30, 10, 50)
-  const data = normalizeForecast(cells.map((_,i) => ({current: {temperature_2m: i % 7 * 5}})), cells, 'temp')
-  const raster = rasterizeForecast(data, 'temp', 32)
-  check(raster.pixels.length === 32*32*4, 'dimensiones raster')
-  check(Math.abs(raster.coordinates[0][0] + 10) < 1e-9 && Math.abs(raster.coordinates[0][1] - 50) < 1e-9, 'georreferencia raster')
-  check(new Set(Array.from(raster.pixels).filter((_,i) => i%4===0)).size > 7, 'gradiente continuo, no siete bloques')
-  const dry = normalizeForecast(cells.map(() => ({current: {precipitation: 0}})),cells,'rain')
-  check(rasterizeForecast(dry,'rain',8).pixels.every((v,i) => i%4!==3 || v===0), 'sin lluvia: transparente')
+  check(sampleGrid([0, 10, 20, 30], .5, .5, 2) === 15, 'suavizado bilineal continuo')
+  check(sampleGrid([0, undefined, 20, 30], .5, .5, 2) === null, 'datos ausentes transparentes')
+  const sector = sectorForViewport({ west: -10, south: 30, east: 10, north: 50 })!
+  const points = forecastPoints(sector)
+  const data = normalizeForecastGrid(points.map((_, i) => ({ current: { temperature_2m: (i % sector.columns) * 4, precipitation: 0 } })), sector)
+  const raster = rasterizeForecast(data, 'temp', 32, 24)
+  check(raster.pixels.length === 32 * 24 * 4, 'dimensiones raster')
+  check(Math.abs(raster.coordinates[0][0] - sector.west) < 1e-9 && Math.abs(raster.coordinates[0][1] - sector.north) < 1e-9, 'georreferencia raster')
+  check(new Set(Array.from(raster.pixels).filter((_, i) => i % 4 === 0)).size > sector.columns, 'gradiente continuo, no bloques')
+  check(rasterizeForecast(data, 'rain', 8, 8).pixels.every((value, i) => i % 4 !== 3 || value === 0), 'sin lluvia: transparente')
+}
+
+console.log('· Clasificación de elementos del mapa base…')
+{
+  const city = classifyBasemapLayer({ id: 'label_city', type: 'symbol', 'source-layer': 'place', layout: { 'icon-image': 'circle', 'text-field': ['get', 'name'] } })
+  check(city.placeIcon && city.name && !city.border, 'mapa: icono y nombre de ciudad separables')
+  const poi = classifyBasemapLayer({ id: 'poi_r1', type: 'symbol', 'source-layer': 'poi', layout: { 'icon-image': ['get', 'class'], 'text-field': ['get', 'name'] } })
+  check(poi.placeIcon && poi.name, 'mapa: POI clasificado')
+  const roadName = classifyBasemapLayer({ id: 'highway-name', type: 'symbol', 'source-layer': 'transportation_name', layout: { 'text-field': ['get', 'name'] } })
+  check(!roadName.placeIcon && roadName.name, 'mapa: nombre de vía clasificado')
+  const oneway = classifyBasemapLayer({ id: 'road_oneway', type: 'symbol', 'source-layer': 'transportation', layout: { 'icon-image': 'oneway' } })
+  check(!oneway.placeIcon && !oneway.name, 'mapa: flecha de sentido no es un pin de lugar')
+  const border = classifyBasemapLayer({ id: 'boundary_2', type: 'line', 'source-layer': 'boundary' })
+  check(border.border, 'mapa: frontera clasificada')
 }
 
 if (failures > 0) {

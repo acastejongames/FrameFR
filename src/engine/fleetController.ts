@@ -1,5 +1,5 @@
-import { RENDER_INTERVAL_MS, TRAIL_LENGTH, UI_INTERVAL_MS, MAX_LIST_ROWS } from '@/config'
-import { clamp, distanceNm, lerp, lerpAngle, wrapLon } from '@/data/geo'
+import { TRAIL_LENGTH, UI_INTERVAL_MS, MAX_LIST_ROWS } from '@/config'
+import { clamp, distanceNm } from '@/data/geo'
 import { createProvider, type ProviderId } from '@/data/registry'
 import type {
   Aircraft,
@@ -81,11 +81,8 @@ interface Pos {
 
 interface Track {
   ac: Aircraft
-  from: Pos
-  to: Pos
-  cur: Pos
-  t0: number
-  t1: number
+  /** Exact coordinates of the newest accepted observation. Never synthesized. */
+  reported: Pos
   /** Upper-cased search corpus, rebuilt on every ingest. */
   hay: string
   /** `performance.now()` of the last poll that reported this track. */
@@ -118,8 +115,8 @@ export const EMPTY_SNAPSHOT: FleetSnapshot = {
  *
  * Responsibilities:
  *  - advance simulated providers and poll live ones at their own cadence,
- *  - dead-reckon / interpolate positions between polls so motion is smooth,
- *  - push a GeoJSON snapshot to MapLibre (~14 fps) and a plain snapshot to
+ *  - render the newest reported position only (no dead reckoning),
+ *  - push a GeoJSON snapshot to MapLibre only when a report changes it,
  *    React (~2 fps), so the UI never re-renders at animation speed.
  */
 export class FleetController {
@@ -138,7 +135,7 @@ export class FleetController {
   private raf = 0
   private lastFrame = 0
   private lastPollAt = 0
-  private lastRenderAt = 0
+  private renderDirty = true
   private lastUiAt = 0
   private pollDelay = 1000
   /** Effective poll cadence of the active provider. */
@@ -148,11 +145,11 @@ export class FleetController {
   private polling = false
   private abort: AbortController | null = null
   private pendingSource: GeoJSONSource | null = null
+  private queuedAircraftData: { type: 'FeatureCollection'; features: AircraftFeature[] } | null = null
   private trailHadData = false
 
   private selectedId: string | null = null
   private follow = false
-  private followZoom = 0
   private maxAircraft = Number.POSITIVE_INFINITY
   private speedFactor = 1
 
@@ -175,7 +172,9 @@ export class FleetController {
   /** Rehydrate a replacement style immediately, without waiting for a feed poll. */
   restoreStyle(): void {
     this.pendingSource = null
+    this.queuedAircraftData = null
     this.trailHadData = false
+    this.renderDirty = false
     this.pushData()
   }
 
@@ -207,7 +206,7 @@ export class FleetController {
   setFilters(filters: FleetFilters): void {
     this.filters = filters
     this.normalizedQuery = filters.query.trim().toUpperCase()
-    this.lastRenderAt = 0
+    this.renderDirty = true
     this.lastUiAt = 0
   }
 
@@ -226,24 +225,20 @@ export class FleetController {
       next.altitudes = []
       next.externalTrail = null
     }
-    this.lastRenderAt = 0
+    this.renderDirty = true
     this.lastUiAt = 0
   }
 
   setFollow(follow: boolean): void {
     this.follow = follow
     this.lastUiAt = 0
-  }
-
-  /** Zoom used while the camera follows the selected aircraft. */
-  setFollowZoom(zoom: number): void {
-    this.followZoom = clamp(zoom, 1.5, 22)
+    if (follow) this.renderDirty = true
   }
 
   /** Maximum number of aircraft rendered on the map. */
   setMaxAircraft(max: number): void {
     this.maxAircraft = max > 0 ? max : Number.POSITIVE_INFINITY
-    this.lastRenderAt = 0
+    this.renderDirty = true
     this.lastUiAt = 0
   }
 
@@ -270,26 +265,24 @@ export class FleetController {
     this.providerId = id
     this.provider = createProvider(id, { fleetSize: this.fleetSize })
     this.provider.configure?.({ fleetSize: this.fleetSize })
-    this.pollIntervalMs = this.pollIntervalOverride ?? this.provider.pollIntervalMs
+    this.pollIntervalMs = this.provider.mode === 'simulated' ? this.provider.pollIntervalMs : this.pollIntervalOverride ?? this.provider.pollIntervalMs
     this.pollDelay = this.pollIntervalMs
     this.tracks.clear()
     this.selectedId = null
     this.status = { state: 'loading' }
     this.lastPollAt = 0
-    this.lastRenderAt = 0
+    this.renderDirty = false
     this.lastUiAt = 0
     this.pushData()
     void this.poll()
   }
 
   /** Smoothly centre the camera on a track. */
-  centerOn(id: string, minZoom = 6.5): void {
+  centerOn(id: string): void {
     const track = this.tracks.get(id)
     if (!track) return
-    this.interpolateTrack(track, performance.now())
     this.map.flyTo({
-      center: [track.cur.lon, track.cur.lat],
-      zoom: Math.max(this.map.getZoom(), minZoom),
+      center: [track.reported.lon, track.reported.lat],
       duration: 1100,
       essential: true,
     })
@@ -299,7 +292,7 @@ export class FleetController {
   positionOf(id: string): { lat: number; lon: number } | undefined {
     const track = this.tracks.get(id)
     if (!track) return undefined
-    return { lat: track.cur.lat, lon: track.cur.lon }
+    return { lat: track.reported.lat, lon: track.reported.lon }
   }
 
   /**
@@ -314,7 +307,7 @@ export class FleetController {
     const track = this.tracks.get(id)
     if (!track || points.length < 2) return
     track.externalTrail = points
-    this.lastRenderAt = 0
+    this.renderDirty = true
     this.lastUiAt = 0
   }
 
@@ -328,36 +321,36 @@ export class FleetController {
   upsertAircraft(aircraft: Aircraft): void {
     const now = performance.now()
     const existing = this.tracks.get(aircraft.id)
-    const to: Pos = {
+    const reported: Pos = {
       lat: aircraft.lat,
       lon: aircraft.lon,
       alt: aircraft.altitude,
       heading: aircraft.heading,
     }
     if (existing) {
-      existing.from = { ...existing.cur }
-      existing.to = to
-      existing.t0 = now
-      existing.t1 = now + (this.pollIntervalMs || this.provider.pollIntervalMs)
+      if (isStaleObservation(existing.ac.observedAt, aircraft.observedAt)) return
+      if (
+        !samePos(existing.reported, reported) ||
+        existing.ac.silhouette !== aircraft.silhouette ||
+        existing.ac.onGround !== aircraft.onGround ||
+        (existing.ac.flightNumber || existing.ac.callsign) !== (aircraft.flightNumber || aircraft.callsign)
+      ) this.renderDirty = true
+      existing.reported = reported
       existing.ac = aircraft
       existing.hay = searchCorpus(aircraft)
       existing.lastSeenAt = now
     } else {
       this.tracks.set(aircraft.id, {
         ac: aircraft,
-        from: { ...to },
-        to,
-        cur: { ...to },
-        t0: now,
-        t1: now,
+        reported,
         hay: searchCorpus(aircraft),
         lastSeenAt: now,
         history: [],
         altitudes: [],
         externalTrail: null,
       })
+      this.renderDirty = true
     }
-    this.lastRenderAt = 0
     this.lastUiAt = 0
   }
 
@@ -378,14 +371,16 @@ export class FleetController {
     track.externalTrail = null
     track.history = []
     track.altitudes = []
-    this.lastRenderAt = 0
+    this.renderDirty = true
     this.lastUiAt = 0
   }
 
   /** Overrides the polling cadence of the active provider. */
   setPollInterval(ms: number): void {
     this.pollIntervalOverride = clamp(ms, 2_000, 60_000)
-    this.pollIntervalMs = this.pollIntervalOverride
+    // A simulator can report its actual generated position every second;
+    // stretching that poll only adds larger steps, never smoother motion.
+    this.pollIntervalMs = this.provider.mode === 'simulated' ? this.provider.pollIntervalMs : this.pollIntervalOverride
     this.pollDelay = this.pollIntervalMs
     this.lastPollAt = 0
   }
@@ -409,21 +404,15 @@ export class FleetController {
       void this.poll()
     }
 
-    // Camera follow runs every frame so the motion stays fluid.
-    if (this.follow && this.selectedId) {
-      const track = this.tracks.get(this.selectedId)
-      if (track) {
-        this.interpolateTrack(track, now)
-        this.map.jumpTo({
-          center: [track.cur.lon, track.cur.lat],
-          zoom: this.followZoom > 0 ? this.followZoom : this.map.getZoom(),
-        })
+    if (this.renderDirty) {
+      this.renderDirty = false
+      this.pushData()
+      // Following recentres only when a new report (or follow itself) arrives.
+      // No zoom is specified, so wheel/pinch zoom remains entirely the user's.
+      if (this.follow && this.selectedId) {
+        const track = this.tracks.get(this.selectedId)
+        if (track) this.map.jumpTo({ center: [track.reported.lon, track.reported.lat] })
       }
-    }
-
-    if (now - this.lastRenderAt >= RENDER_INTERVAL_MS) {
-      this.lastRenderAt = now
-      this.pushData(now)
     }
 
     if (now - this.lastUiAt >= UI_INTERVAL_MS) {
@@ -484,45 +473,50 @@ export class FleetController {
   }
 
   private ingest(list: Aircraft[], now: number): void {
-    const window = this.pollIntervalMs || this.provider.pollIntervalMs
     const seen = new Set<string>()
 
     for (const ac of list) {
       seen.add(ac.id)
-      const to: Pos = { lat: ac.lat, lon: ac.lon, alt: ac.altitude, heading: ac.heading }
+      const reported: Pos = { lat: ac.lat, lon: ac.lon, alt: ac.altitude, heading: ac.heading }
       const existing = this.tracks.get(ac.id)
 
       if (!existing) {
         this.tracks.set(ac.id, {
           ac,
-          from: { ...to },
-          to,
-          cur: { ...to },
-          t0: now - window,
-          t1: now,
+          reported,
           hay: searchCorpus(ac),
           lastSeenAt: now,
           history: [],
           altitudes: [],
           externalTrail: null,
         })
+        this.renderDirty = true
         continue
       }
 
-      existing.from = { ...existing.cur }
-      existing.to = to
-      existing.t0 = now
-      existing.t1 = now + window
+      if (isStaleObservation(existing.ac.observedAt, ac.observedAt)) {
+        existing.lastSeenAt = now
+        continue
+      }
+
+      const positionChanged = !samePos(existing.reported, reported)
+      const iconChanged = existing.ac.silhouette !== ac.silhouette || existing.ac.onGround !== ac.onGround
+      const labelChanged = (existing.ac.flightNumber || existing.ac.callsign) !== (ac.flightNumber || ac.callsign)
+      if (positionChanged || iconChanged || labelChanged) this.renderDirty = true
+      existing.reported = reported
       existing.ac = ac
       existing.hay = searchCorpus(ac)
       existing.lastSeenAt = now
 
-      if (ac.id === this.selectedId) {
-        existing.history.push([to.lon, to.lat])
-        existing.altitudes.push(to.alt)
-        if (existing.history.length > TRAIL_LENGTH) {
-          existing.history.shift()
-          existing.altitudes.shift()
+      if (ac.id === this.selectedId && positionChanged) {
+        const last = existing.history.at(-1)
+        if (!last || last[0] !== reported.lon || last[1] !== reported.lat) {
+          existing.history.push([reported.lon, reported.lat])
+          existing.altitudes.push(reported.alt)
+          if (existing.history.length > TRAIL_LENGTH) {
+            existing.history.shift()
+            existing.altitudes.shift()
+          }
         }
       }
     }
@@ -534,23 +528,10 @@ export class FleetController {
       if (seen.has(id)) continue
       if (now - track.lastSeenAt > graceMs) {
         this.tracks.delete(id)
+        this.renderDirty = true
         if (this.selectedId === id) this.selectedId = null
       }
     }
-  }
-
-  /** Position between the last two reports; also a light dead-reckoning. */
-  private interpolateTrack(track: Track, now: number): void {
-    const span = Math.max(1, track.t1 - track.t0)
-    const p = clamp((now - track.t0) / span, 0, 1.15)
-    let lonTo = track.to.lon
-    if (Math.abs(lonTo - track.from.lon) > 180) {
-      lonTo += lonTo > track.from.lon ? -360 : 360
-    }
-    track.cur.lat = track.from.lat + (track.to.lat - track.from.lat) * p
-    track.cur.lon = wrapLon(track.from.lon + (lonTo - track.from.lon) * p)
-    track.cur.alt = lerp(track.from.alt, track.to.alt, p)
-    track.cur.heading = lerpAngle(track.from.heading, track.to.heading, Math.min(p, 1))
   }
 
   private matches(track: Track): boolean {
@@ -562,21 +543,20 @@ export class FleetController {
   }
 
   /** Build the GeoJSON pushed to MapLibre and refresh the selection trail. */
-  private pushData(now = performance.now()): void {
+  private pushData(): void {
     const features: AircraftFeature[] = []
     for (const [id, track] of this.tracks) {
       if (features.length >= this.maxAircraft) break
-      this.interpolateTrack(track, now)
       const selected = id === this.selectedId
       if (!selected && !this.matches(track)) continue
-      const altitude = Math.round(track.cur.alt)
+      const altitude = Math.round(track.reported.alt)
       features.push({
         type: 'Feature',
-        geometry: { type: 'Point', coordinates: [track.cur.lon, track.cur.lat] },
+        geometry: { type: 'Point', coordinates: [track.reported.lon, track.reported.lat] },
         properties: {
           id,
           callsign: track.ac.callsign,
-          heading: track.cur.heading,
+          heading: track.reported.heading,
           altitude,
           icon: aircraftIconId(track.ac.silhouette, track.ac.onGround, selected),
           selected: selected ? 1 : 0,
@@ -586,12 +566,15 @@ export class FleetController {
     }
 
     const source = this.map.getSource(AIRCRAFT_SOURCE) as GeoJSONSource | undefined
-    if (source && source !== this.pendingSource) {
-      this.pendingSource = source
+    if (source) {
       const collection = { type: 'FeatureCollection' as const, features }
-      void source.setData(collection).catch(() => undefined).finally(() => {
-        if (this.pendingSource === source) this.pendingSource = null
-      })
+      if (this.pendingSource === source) {
+        // Keep only the newest queued snapshot; stale intermediate frames
+        // would otherwise land later and make icons jump backwards.
+        this.queuedAircraftData = collection
+      } else {
+        this.flushAircraftData(source, collection)
+      }
     }
 
     // Trail of the selected aircraft (only pushed when it actually changes).
@@ -606,6 +589,22 @@ export class FleetController {
           .catch(() => undefined)
       }
     }
+  }
+
+  private flushAircraftData(
+    source: GeoJSONSource,
+    collection: { type: 'FeatureCollection'; features: AircraftFeature[] },
+  ): void {
+    this.pendingSource = source
+    void Promise.resolve(source.setData(collection))
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.pendingSource !== source) return
+        this.pendingSource = null
+        const queued = this.queuedAircraftData
+        this.queuedAircraftData = null
+        if (queued) this.flushAircraftData(source, queued)
+      })
   }
 
   /**
@@ -623,7 +622,7 @@ export class FleetController {
         point.lon,
         point.lat,
       ])
-      coordinates.push([track.cur.lon, track.cur.lat])
+      coordinates.push([track.reported.lon, track.reported.lat])
       return { type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: {} }
     }
 
@@ -632,7 +631,7 @@ export class FleetController {
         type: 'Feature',
         geometry: {
           type: 'LineString',
-          coordinates: [...track.history, [track.cur.lon, track.cur.lat]],
+          coordinates: [...track.history, [track.reported.lon, track.reported.lat]],
         },
         properties: {},
       }
@@ -653,7 +652,7 @@ export class FleetController {
     let sumAltitude = 0
 
     for (const [id, track] of this.tracks) {
-      const altitude = Math.round(track.cur.alt)
+      const altitude = Math.round(track.reported.alt)
       if (track.ac.onGround) {
         onGround++
       } else {
@@ -664,11 +663,11 @@ export class FleetController {
       if (!this.matches(track) && id !== this.selectedId) continue
       const entry: RenderAircraft = {
         ...track.ac,
-        lat: track.cur.lat,
-        lon: track.cur.lon,
+        lat: track.reported.lat,
+        lon: track.reported.lon,
         altitude,
-        heading: track.cur.heading,
-        distanceNm: distanceNm(centerLatLon, { lat: track.cur.lat, lon: track.cur.lon }),
+        heading: track.reported.heading,
+        distanceNm: distanceNm(centerLatLon, { lat: track.reported.lat, lon: track.reported.lon }),
         band: bandKey(altitude, track.ac.onGround),
         selected: id === this.selectedId,
       }
@@ -697,6 +696,15 @@ export class FleetController {
     }
     for (const listener of this.listeners) listener()
   }
+}
+
+function samePos(a: Pos, b: Pos): boolean {
+  return a.lat === b.lat && a.lon === b.lon && a.alt === b.alt && a.heading === b.heading
+}
+
+/** Epoch timestamps carried by each observation define the only valid order. */
+function isStaleObservation(current: number, incoming: number): boolean {
+  return Number.isFinite(current) && Number.isFinite(incoming) && current > 0 && incoming > 0 && incoming < current
 }
 
 function searchCorpus(ac: Aircraft): string {

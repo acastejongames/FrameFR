@@ -1,3 +1,17 @@
+## Seguimiento sin zoom forzado, meteorología estable y capas del mapa — 2026-10-19
+
+- Eliminado por completo el zoom de seguimiento; seguir o centrar conserva
+  el zoom elegido con la rueda, el gesto táctil o el doble clic.
+- Los aviones se dibujan solo en coordenadas informadas: sin interpolación,
+  extrapolación ni sobreimpulso. Se descartan informes antiguos, no se
+  reenvía geometría idéntica y una actualización lenta de MapLibre ya no
+  puede reponer posiciones obsoletas.
+- Meteorología por sectores estables con histéresis y caché: una petición
+  Open-Meteo alimenta las cuatro capas, mientras una capa válida permanece
+  visible durante actualizaciones y reintentos.
+- Mapa base con interruptores persistentes para iconos de lugares, nombres
+  y fronteras, reaplicados al cambiar de estilo.
+
 ## Correcciones de mapa, meteorología y escala — 2026-10-19
 
 - Los aviones sobreviven a un cambio de estilo: la fuente de repuesto recibe

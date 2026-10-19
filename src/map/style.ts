@@ -35,38 +35,122 @@ export function getBasemap(id: BasemapId): BasemapOption {
   return BASEMAP_BY_ID.get(id) ?? BASEMAPS[0]
 }
 
-/* ------------------------------------------------- basemap names (labels) */
+/* ------------------------------------------- basemap layer visibility */
 
-/** Original `layout.visibility` of every basemap symbol layer, per map. */
-const savedVisibility = new WeakMap<MapLibreMap, Map<string, 'visible' | 'none'>>()
+export interface BasemapLayerVisibility {
+  /** Point markers for places and points of interest. */
+  placeIcons: boolean
+  /** Text labels: settlements, regions, roads, waters and POI names. */
+  names: boolean
+  /** Administrative boundary lines. */
+  borders: boolean
+}
+
+export const DEFAULT_BASEMAP_LAYERS: BasemapLayerVisibility = {
+  placeIcons: true,
+  names: true,
+  borders: true,
+}
+
+export interface BasemapLayerClassification {
+  placeIcon: boolean
+  name: boolean
+  border: boolean
+}
+
+interface StyleLayerSnapshot {
+  id: string
+  type: string
+  'source-layer'?: string
+  layout?: Record<string, unknown>
+  paint?: Record<string, unknown>
+}
+
+interface CapturedBasemapLayer extends BasemapLayerClassification {
+  id: string
+  type: string
+  visibility: 'visible' | 'none'
+  iconOpacity: never
+  textOpacity: never
+  circleOpacity: never
+}
+
+const capturedByMap = new WeakMap<MapLibreMap, CapturedBasemapLayer[]>()
+
+const nonEmpty = (value: unknown): boolean => value !== undefined && value !== null && value !== ''
+
+export function classifyBasemapLayer(layer: StyleLayerSnapshot): BasemapLayerClassification {
+  const id = layer.id.toLowerCase()
+  const sourceLayer = (layer['source-layer'] ?? '').toLowerCase()
+  const markerSource = ['place', 'poi', 'aeroway'].includes(sourceLayer)
+  const markerId = /(^|[-_])(poi|place|aerodrome|airport)([-_]|$)/.test(id)
+  return {
+    border:
+      sourceLayer === 'boundary' || /(^|[-_])(boundary|border|admin)([-_]|$)/.test(id),
+    name: layer.type === 'symbol' && nonEmpty(layer.layout?.['text-field']),
+    placeIcon:
+      (layer.type === 'symbol' && nonEmpty(layer.layout?.['icon-image']) && (markerSource || markerId)) ||
+      (layer.type === 'circle' && (markerSource || markerId)),
+  }
+}
 
 /**
- * Called on every `style.load`: remembers the visibility of the basemap's
- * symbol layers (names, POIs, road shields…) and applies the current setting.
- * Layers added by FrameFR are skipped.
+ * Called on every `style.load`: remembers the style's own visibility and
+ * opacity expressions, then applies the user's three independent choices.
+ * FrameFR's aircraft/weather layers are deliberately left untouched.
  */
-export function captureBasemapNames(map: MapLibreMap, visible: boolean): void {
-  const saved = new Map<string, 'visible' | 'none'>()
-  for (const layer of map.getStyle().layers) {
-    if (layer.type !== 'symbol' || layer.id.startsWith('framefr-')) continue
-    const layout = (layer as { layout?: { visibility?: 'visible' | 'none' } }).layout
-    saved.set(layer.id, layout?.visibility === 'none' ? 'none' : 'visible')
+export function captureBasemapLayers(
+  map: MapLibreMap,
+  visibility: BasemapLayerVisibility,
+): void {
+  const captured: CapturedBasemapLayer[] = []
+  for (const rawLayer of map.getStyle().layers) {
+    if (rawLayer.id.startsWith('framefr-') || rawLayer.id.startsWith('aeroscope-')) continue
+    const layer = rawLayer as unknown as StyleLayerSnapshot
+    captured.push({
+      id: layer.id,
+      type: layer.type,
+      visibility: layer.layout?.visibility === 'none' ? 'none' : 'visible',
+      iconOpacity: (layer.paint?.['icon-opacity'] ?? 1) as never,
+      textOpacity: (layer.paint?.['text-opacity'] ?? 1) as never,
+      circleOpacity: (layer.paint?.['circle-opacity'] ?? 1) as never,
+      ...classifyBasemapLayer(layer),
+    })
   }
-  savedVisibility.set(map, saved)
-  applyBasemapNames(map, visible)
+  capturedByMap.set(map, captured)
+  applyBasemapLayers(map, visibility)
 }
 
-/** Shows or hides the basemap names, restoring each layer's original state. */
-export function setBasemapNamesVisible(map: MapLibreMap, visible: boolean): void {
-  // Style still loading: the setting is applied again on `style.load`.
-  if (!map.isStyleLoaded()) return
-  applyBasemapNames(map, visible)
+export function setBasemapLayerVisibility(
+  map: MapLibreMap,
+  visibility: BasemapLayerVisibility,
+): void {
+  // Style still loading: the settings are applied again on `style.load`.
+  if (!map.isStyleLoaded() || !capturedByMap.has(map)) return
+  applyBasemapLayers(map, visibility)
 }
 
-function applyBasemapNames(map: MapLibreMap, visible: boolean): void {
-  for (const [id, original] of savedVisibility.get(map) ?? []) {
-    if (map.getLayer(id)) {
-      map.setLayoutProperty(id, 'visibility', visible ? original : 'none')
+function applyBasemapLayers(map: MapLibreMap, settings: BasemapLayerVisibility): void {
+  for (const layer of capturedByMap.get(map) ?? []) {
+    if (!map.getLayer(layer.id)) continue
+    let visibility = layer.visibility
+    if (layer.border && !settings.borders) visibility = 'none'
+    // A layer that contains only markers or only text can be removed from
+    // layout entirely. Mixed symbol layers keep layout and use opacity so
+    // city dots and city names really can be toggled independently.
+    if (layer.placeIcon && !layer.name && !settings.placeIcons) visibility = 'none'
+    if (layer.name && !layer.placeIcon && !settings.names) visibility = 'none'
+    map.setLayoutProperty(layer.id, 'visibility', visibility)
+
+    if (layer.type === 'symbol') {
+      if (layer.placeIcon) {
+        map.setPaintProperty(layer.id, 'icon-opacity', settings.placeIcons ? layer.iconOpacity : 0)
+      }
+      if (layer.name) {
+        map.setPaintProperty(layer.id, 'text-opacity', settings.names ? layer.textOpacity : 0)
+      }
+    } else if (layer.type === 'circle' && layer.placeIcon) {
+      map.setPaintProperty(layer.id, 'circle-opacity', settings.placeIcons ? layer.circleOpacity : 0)
     }
   }
 }
