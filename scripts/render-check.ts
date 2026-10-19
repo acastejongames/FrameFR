@@ -182,11 +182,22 @@ expect(labels.getAttribute('aria-pressed') === 'false', 'etiquetas debe actualiz
 container.querySelector<HTMLButtonElement>('[title="Ocultar interfaz (U)"]')!.click()
 await flush()
 expect(window.document.body.classList.contains('ui-clean-mode'), 'no se activa el modo limpio')
-const restore = container.querySelector<HTMLButtonElement>('.restore-ui')
-expect(Boolean(restore), 'el modo limpio debe tener salida táctil')
-restore?.click()
+expect(!container.querySelector('.restore-ui'), 'modo limpio no debe dejar botones visibles')
+expect(container.querySelector('.ui-overlay')?.hasAttribute('inert') ?? false, 'UI oculta no debe aceptar foco')
+window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'u', bubbles: true }))
 await flush()
-expect(!window.document.body.classList.contains('ui-clean-mode'), 'no se restaura la interfaz')
+expect(!window.document.body.classList.contains('ui-clean-mode'), 'U debe recuperar la interfaz')
+expect(container.querySelectorAll('#map-tools .basemap-option').length === 6, 'todos los mapas disponibles en la barra')
+expect(Boolean(container.querySelector('header .airport-strip')), 'aeropuertos integrados en cabecera')
+container.querySelector<HTMLButtonElement>('[aria-label="Ajustes"]')!.click()
+await flush()
+const scale = container.querySelector<HTMLSelectElement>('#ui-scale')!
+expect(Boolean(scale), 'selector de escala presente')
+scale.value = '2'
+scale.dispatchEvent(new window.Event('change', { bubbles: true }))
+await flush()
+expect(container.querySelector<HTMLElement>('.ui-overlay')?.style.transform === 'scale(2)', 'escala aplicada solo a UI')
+expect(window.localStorage.getItem('aeroscope:ui-scale') === '2', 'escala persistida')
 
 /* The critical runtime errors that must not appear. */
 const fatalPatterns = [

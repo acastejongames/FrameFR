@@ -9,18 +9,19 @@ export type ForecastMode = Exclude<WeatherMode, 'none' | 'radar'>
 export const WEATHER_FIELDS: Record<ForecastMode, string> = {
   wind: 'wind_speed_10m', temp: 'temperature_2m', rain: 'precipitation', storm: 'weather_code',
 }
+export const WEATHER_GRID_SIZE = 7
 export interface WeatherCell { lat: number; lon: number; polygon: number[][] }
 
-/** A bounded 5×5 grid: one API request, not one request per point. */
+/** A bounded 7×7 grid: one API request, not one request per point. */
 export function weatherGrid(west: number, south: number, east: number, north: number): WeatherCell[] {
   if (![west, south, east, north].every(Number.isFinite)) return []
   const s = Math.max(-80, south), n = Math.min(80, north)
   const width = Math.min(360, east - west)
   if (width <= 0 || n <= s) return []
   const cells: WeatherCell[] = []
-  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
-    const x = west + width * c / 5, y = s + (n - s) * r / 5
-    const x2 = x + width / 5, y2 = y + (n - s) / 5
+  for (let r = 0; r < WEATHER_GRID_SIZE; r++) for (let c = 0; c < WEATHER_GRID_SIZE; c++) {
+    const x = west + width * c / WEATHER_GRID_SIZE, y = s + (n - s) * r / WEATHER_GRID_SIZE
+    const x2 = x + width / WEATHER_GRID_SIZE, y2 = y + (n - s) / WEATHER_GRID_SIZE
     cells.push({ lat: (y + y2) / 2, lon: (((x + x2) / 2 + 180) % 360 + 360) % 360 - 180,
       polygon: [[x, y], [x2, y], [x2, y2], [x, y2], [x, y]] })
   }
@@ -29,11 +30,11 @@ export function weatherGrid(west: number, south: number, east: number, north: nu
 
 export function normalizeForecast(payload: unknown, cells: WeatherCell[], mode: ForecastMode): FeatureCollection<Polygon> {
   const list = Array.isArray(payload) ? payload : [payload]
-  return { type: 'FeatureCollection', features: cells.flatMap((cell, i) => {
+  return { type: 'FeatureCollection', bbox: cells.length ? [...cells[0].polygon[0], ...cells.at(-1)!.polygon[2]] as [number, number, number, number] : undefined, features: cells.flatMap((cell, i) => {
     const value = list[i]?.current?.[WEATHER_FIELDS[mode]]
     // Missing data is a hole, never a fabricated temperature or zero rainfall.
     if (typeof value !== 'number' || !Number.isFinite(value)) return []
-    return [{ type: 'Feature' as const, properties: { value },
+    return [{ type: 'Feature' as const, properties: { value, gridIndex: i },
       geometry: { type: 'Polygon' as const, coordinates: [cell.polygon] } }]
   }) }
 }

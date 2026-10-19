@@ -176,6 +176,14 @@ export const TopBar = forwardRef<HTMLInputElement, TopBarProps>(function TopBar(
           </div>
         </div>
 
+      {showHubs && (
+        <div className="airport-strip" data-clean-hide>
+          <span className="airport-strip-label">
+            <MapPin size={13} /> AEROPUERTOS
+          </span>
+          {children}
+        </div>
+      )}
         {/* Right hand widgets */}
         <div className="topbar-actions">
           {/* UTC clock */}
@@ -238,14 +246,7 @@ export const TopBar = forwardRef<HTMLInputElement, TopBarProps>(function TopBar(
           </button>
         </div>
       </header>
-      {showHubs && (
-        <div className="airport-strip" data-clean-hide>
-          <span className="airport-strip-label">
-            <MapPin size={13} /> AEROPUERTOS
-          </span>
-          {children}
-        </div>
-      )}
+
     </>
   )
 })

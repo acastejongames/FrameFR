@@ -147,7 +147,7 @@ export class FleetController {
   private pollIntervalOverride: number | null = null
   private polling = false
   private abort: AbortController | null = null
-  private dataPending = false
+  private pendingSource: GeoJSONSource | null = null
   private trailHadData = false
 
   private selectedId: string | null = null
@@ -171,6 +171,13 @@ export class FleetController {
   }
 
   /* ---------------------------------------------------------------- public */
+
+  /** Rehydrate a replacement style immediately, without waiting for a feed poll. */
+  restoreStyle(): void {
+    this.pendingSource = null
+    this.trailHadData = false
+    this.pushData()
+  }
 
   start(): void {
     this.lastFrame = performance.now()
@@ -578,16 +585,13 @@ export class FleetController {
       })
     }
 
-    if (!this.dataPending) {
-      this.dataPending = true
-      const source = this.map.getSource(AIRCRAFT_SOURCE) as GeoJSONSource | undefined
+    const source = this.map.getSource(AIRCRAFT_SOURCE) as GeoJSONSource | undefined
+    if (source && source !== this.pendingSource) {
+      this.pendingSource = source
       const collection = { type: 'FeatureCollection' as const, features }
-      source
-        ?.setData(collection)
-        .catch(() => undefined)
-        .finally(() => {
-          this.dataPending = false
-        })
+      void source.setData(collection).catch(() => undefined).finally(() => {
+        if (this.pendingSource === source) this.pendingSource = null
+      })
     }
 
     // Trail of the selected aircraft (only pushed when it actually changes).

@@ -1,3 +1,9 @@
+const nodeGlobals = globalThis as typeof globalThis & { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown }
+nodeGlobals.requestAnimationFrame ??= () => 0
+nodeGlobals.cancelAnimationFrame ??= () => undefined
+import { sampleGrid, rasterizeForecast } from '../src/data/weather/raster'
+import { FleetController } from '../src/engine/fleetController'
+import type { Aircraft } from '../src/data/types'
 /**
  * Headless sanity check for the data layer.
  *
@@ -309,10 +315,39 @@ console.log('· Enriquecimiento con el código de aerolínea…')
   check(aircraft.flightNumber === 'FR1234', `vuelo: incorrecto (${aircraft.flightNumber})`)
 }
 
+/* Aircraft must survive a style swap: replacement source gets fresh data. */
+{
+  const sourceSets: Array<[string, number]> = []
+  const sources = ['old', 'fresh']
+  const fakeSources = new Map<string, { setData: (d: unknown) => Promise<void> }>()
+  for (const name of sources) fakeSources.set(name, {
+    setData: (data: unknown) => { sourceSets.push([name, (data as {features: unknown[]}).features.length]); return Promise.resolve() },
+  })
+  let active = 'old'
+  const fakeMap = {
+    getSource: () => fakeSources.get(active),
+    on: () => undefined, off: () => undefined, getBounds: () => ({ getCenter: () => ({lat: 40, lng: -3}) }),
+    getZoom: () => 6, getCenter: () => ({lat: 40, lng: -3}),
+  } as unknown as Parameters<typeof FleetController>[0] extends never ? never : import('maplibre-gl').Map
+  const controller = new FleetController({ map: fakeMap, providerId: 'simulated' as never, fleetSize: 5, filters: { query: '', categories: [], airborneOnly: false }, onFollowChange: () => undefined })
+  const base = { id: 'TEST1', callsign: 'TEST1', flightNumber: 'TEST1', registration: 'EC-TEST', aircraftType: 'B738', aircraftTypeDesc: undefined, category: 'airliner', silhouette: 'heavy', airlineIcao: undefined, airlineIata: undefined, country: 'ES', lat: 40, lon: -3, altitude: 30000, groundSpeed: 450, heading: 90, verticalSpeed: 0, onGround: false, squawk: undefined, lastSeen: 0 } as unknown as Aircraft
+  controller.upsertAircraft(base)
+  controller.upsertAircraft({ ...base, id: 'TEST2', lat: 41 })
+  const internals = controller as unknown as { pushData: (now?: number) => void }
+  internals.pushData()
+  check(sourceSets.at(-1)?.[0] === 'old' && sourceSets.at(-1)?.[1] === 2, 'datos enviados a la fuente inicial')
+  active = 'fresh'
+  internals.pushData()
+  check(sourceSets.at(-1)?.[0] === 'fresh' && sourceSets.at(-1)?.[1] === 2, 'fuente de repuesto recibe los aviones')
+  controller.restoreStyle()
+  check(sourceSets.at(-1)?.[0] === 'fresh' && sourceSets.at(-1)?.[1] === 2, 'restoreStyle repone los aviones tras cambiar el mapa')
+  controller.destroy()
+}
+
 console.log('· Meteorología: cuadrícula, valores ausentes y validación de radar…')
 {
   const cells = weatherGrid(170, -10, 190, 10)
-  check(cells.length === 25, 'meteorología: cuadrícula acotada')
+  check(cells.length === 49, 'meteorología: cuadrícula acotada')
   check(cells.every(c => c.lon >= -180 && c.lon <= 180), 'meteorología: antimeridiano')
   check(weatherGrid(0, 90, 1, 100).length === 0, 'meteorología: latitudes fuera del modelo')
   check(weatherGrid(NaN, 0, 1, 1).length === 0, 'meteorología: coordenadas inválidas')
@@ -325,6 +360,19 @@ console.log('· Meteorología: cuadrícula, valores ausentes y validación de ra
     try { latestRadar(payload) } catch { rejected = true }
     check(rejected, 'meteorología: rechazar metadatos inválidos')
   }
+}
+
+{
+  check(sampleGrid([0,10,20,30], .5, .5, 2) === 15, 'interpolación bilineal continua')
+  check(sampleGrid([0,undefined,20,30], .5, .5, 2) === null, 'datos ausentes transparentes')
+  const cells = weatherGrid(-10, 30, 10, 50)
+  const data = normalizeForecast(cells.map((_,i) => ({current: {temperature_2m: i % 7 * 5}})), cells, 'temp')
+  const raster = rasterizeForecast(data, 'temp', 32)
+  check(raster.pixels.length === 32*32*4, 'dimensiones raster')
+  check(Math.abs(raster.coordinates[0][0] + 10) < 1e-9 && Math.abs(raster.coordinates[0][1] - 50) < 1e-9, 'georreferencia raster')
+  check(new Set(Array.from(raster.pixels).filter((_,i) => i%4===0)).size > 7, 'gradiente continuo, no siete bloques')
+  const dry = normalizeForecast(cells.map(() => ({current: {precipitation: 0}})),cells,'rain')
+  check(rasterizeForecast(dry,'rain',8).pixels.every((v,i) => i%4!==3 || v===0), 'sin lluvia: transparente')
 }
 
 if (failures > 0) {

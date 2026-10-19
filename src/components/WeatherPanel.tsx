@@ -1,3 +1,4 @@
+import { forecastImage } from '@/data/weather/raster'
 import {
   CloudSun,
   CloudRain,
@@ -10,7 +11,7 @@ import {
 } from 'lucide-react'
 import { ToolPopover } from './ToolPopover'
 import { useEffect, useRef, useState } from 'react'
-import type { ExpressionSpecification, Map } from 'maplibre-gl'
+import type { Map } from 'maplibre-gl'
 import {
   WEATHER_MODES,
   fetchForecast,
@@ -22,54 +23,6 @@ import { AIRCRAFT_LAYER, TRAIL_GLOW_LAYER } from '@/map/aircraftLayers'
 
 const SOURCE = 'aeroscope-weather'
 const LAYER = 'aeroscope-weather-fill'
-const COLORS: Record<string, ExpressionSpecification> = {
-  temp: [
-    'interpolate',
-    ['linear'],
-    ['get', 'value'],
-    -20,
-    '#6366f1',
-    0,
-    '#38bdf8',
-    15,
-    '#34d399',
-    30,
-    '#fbbf24',
-    45,
-    '#ef4444',
-  ],
-  wind: [
-    'interpolate',
-    ['linear'],
-    ['get', 'value'],
-    0,
-    '#475569',
-    20,
-    '#38bdf8',
-    40,
-    '#34d399',
-    70,
-    '#fbbf24',
-    100,
-    '#ef4444',
-  ],
-  rain: [
-    'interpolate',
-    ['linear'],
-    ['get', 'value'],
-    0,
-    '#475569',
-    0.5,
-    '#38bdf8',
-    2,
-    '#34d399',
-    5,
-    '#fbbf24',
-    20,
-    '#e879f9',
-  ],
-  storm: ['case', ['>=', ['get', 'value'], 95], '#f43f5e', '#475569'],
-}
 const LEGENDS: Record<WeatherMode, string> = {
   none: '',
   radar: 'Radar observado · cobertura variable. Sin eco no significa sin lluvia.',
@@ -101,7 +54,7 @@ export function WeatherPanel({
     if (layer)
       map?.setPaintProperty(
         LAYER,
-        layer.type === 'raster' ? 'raster-opacity' : 'fill-opacity',
+        'raster-opacity',
         opacity,
       )
   }, [map, opacity])
@@ -119,7 +72,7 @@ export function WeatherPanel({
       if (map.getSource(SOURCE)) map.removeSource(SOURCE)
     }
     const update = async () => {
-      if (disposed || !map.isStyleLoaded() || document.hidden) return
+      if (disposed || !map.getLayer(AIRCRAFT_LAYER) || document.hidden) return
       request?.abort()
       const controller = new AbortController()
       request = controller
@@ -142,7 +95,7 @@ export function WeatherPanel({
             controller.signal,
           )
         }
-        if (disposed || controller.signal.aborted || !map.isStyleLoaded()) return
+        if (disposed || controller.signal.aborted || !map.getLayer(AIRCRAFT_LAYER)) return
         clear()
         const before = map.getLayer(TRAIL_GLOW_LAYER)
           ? TRAIL_GLOW_LAYER
@@ -168,21 +121,11 @@ export function WeatherPanel({
           )
           setStatus(`Radar · ${new Date(radar.time * 1000).toISOString().slice(11, 16)} UTC`)
         } else if (data) {
-          map.addSource(SOURCE, {
-            type: 'geojson',
-            data,
-            attribution: '<a href="https://open-meteo.com/">Open-Meteo</a> · CC BY 4.0',
-          })
-          map.addLayer(
-            {
-              id: LAYER,
-              type: 'fill',
-              source: SOURCE,
-              paint: { 'fill-color': COLORS[mode], 'fill-opacity': opacityRef.current },
-            },
-            before,
-          )
-          setStatus('Open-Meteo · modelo actual · cuadrícula de baja resolución')
+          const image = forecastImage(data, mode as Exclude<WeatherMode, 'none' | 'radar'>)
+          map.addSource(SOURCE, { type: 'image', ...image })
+          map.addLayer({ id: LAYER, type: 'raster', source: SOURCE,
+            paint: { 'raster-opacity': opacityRef.current, 'raster-resampling': 'linear', 'raster-fade-duration': 0 } }, before)
+          setStatus('Open-Meteo · modelo interpolado · no añade precisión a los datos')
         }
       } catch (error) {
         if (disposed || request !== controller) return

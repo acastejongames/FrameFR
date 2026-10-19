@@ -149,9 +149,11 @@ export function MapCanvas({
       setLabelsVisible(map, latest.current.labels)
       setTrailVisible(map, latest.current.trail)
       captureBasemapNames(map, latest.current.basemapNames)
+      controllerRef.current?.restoreStyle()
     }
 
     const handleLoad = () => {
+      if (controllerRef.current) return
       const controller = new FleetController({
         map,
         providerId: latest.current.providerId,
@@ -187,6 +189,7 @@ export function MapCanvas({
     }
 
     const handleMapClick = (event: MapMouseEvent) => {
+      if (!map.getLayer(AIRCRAFT_LAYER)) return
       const hits = map.queryRenderedFeatures(event.point, { layers: [AIRCRAFT_LAYER] })
       if (hits.length === 0) latest.current.onSelect(null)
     }
@@ -326,6 +329,7 @@ export function MapCanvas({
       <div ref={containerRef} className="h-full w-full" />
       {hover && (
         <div
+          data-clean-hide
           ref={tooltipRef}
           className="pointer-events-none absolute left-0 top-0 z-20 rounded-lg border border-white/10 bg-[#0b0d12]/92 px-2.5 py-1.5 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.9)] backdrop-blur-md"
         >

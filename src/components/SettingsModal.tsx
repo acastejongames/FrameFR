@@ -12,6 +12,8 @@ import type { BasemapId } from '@/map/style'
 import { BASEMAPS } from '@/map/style'
 
 interface SettingsModalProps {
+  uiScale: number
+  onUiScaleChange: (scale: number) => void
   open: boolean
   onClose: () => void
   providerId: ProviderId
@@ -42,6 +44,8 @@ const GUI_TOGGLES: Array<{ key: keyof GuiVisibility; label: string }> = [
 ]
 
 export function SettingsModal({
+  uiScale,
+  onUiScaleChange,
   open,
   onClose,
   providerId,
@@ -76,7 +80,7 @@ export function SettingsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3">
-      <div className="panel-raised flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-lg">
+      <div style={{ maxHeight: 'calc(var(--ui-height, 100dvh) * .9)' }} className="panel-raised flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-lg">
         <div className="flex items-center justify-between border-b border-white/[0.07] bg-[#14171c] px-4 py-3">
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-accent" />
@@ -96,6 +100,15 @@ export function SettingsModal({
 
         <div className="scroll-thin space-y-4 overflow-y-auto p-4 text-xs">
           {/* Interface visibility */}
+          <section className="mb-4">
+            <label htmlFor="ui-scale" className="block text-sm text-white/80">Tamaño de la interfaz</label>
+            <select id="ui-scale" value={uiScale} onChange={e => onUiScaleChange(Number(e.target.value))} className="mt-2 w-full rounded bg-ink-700 p-2 text-sm">
+              <option value={0.5}>×0.5 · Compacta</option>
+              <option value={1}>×1 · Actual</option>
+              <option value={2}>×2 · Grande</option>
+            </select>
+            <p className="mt-2 text-xs text-white/50">Solo cambia la UI, no el mapa. Ocultar UI elimina todos los controles; pulsa U para volver.</p>
+          </section>
           <section className="space-y-2.5">
             <div className="text-[11px] font-bold uppercase tracking-wider text-accent">
               Elementos de la interfaz (mostrar / ocultar)

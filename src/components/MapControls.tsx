@@ -12,7 +12,7 @@ import {
   Check,
 } from 'lucide-react'
 import type { Map } from 'maplibre-gl'
-import type { BasemapId } from '@/map/style'
+import { BASEMAPS, type BasemapId } from '@/map/style'
 import { ToolPopover } from './ToolPopover'
 import { WeatherPanel } from './WeatherPanel'
 
@@ -29,11 +29,9 @@ interface MapControlsProps {
   onLocate: () => void
   visible: boolean
 }
-const STYLES = [
-  { id: 'dark', label: 'Oscuro', icon: Moon },
-  { id: 'positron', label: 'Claro', icon: Sun },
-  { id: 'liberty', label: 'Terreno', icon: Mountain },
-] as const
+const STYLES = BASEMAPS.map(style => ({ ...style,
+  icon: style.id === 'dark' ? Moon : style.id === '3d' ? Compass : style.id === 'liberty' || style.id === 'fiord' ? Mountain : Sun,
+}))
 
 export function MapControls({
   map,

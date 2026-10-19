@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, X } from 'lucide-react'
 import {
   DEFAULT_GUI_VISIBILITY,
@@ -51,6 +51,9 @@ export default function App() {
   const [gui, setGui] = usePersistentState<GuiVisibility>('gui', DEFAULT_GUI_VISIBILITY)
   const [sortBy, setSortBy] = usePersistentState<SortKey>('sort', DEFAULT_SORT_KEY)
   const [hubItems, setHubItems] = usePersistentState<HubItem[]>('hubs', loadHubItems)
+
+  const [uiScale, setUiScale] = usePersistentState<number>('ui-scale', 1,
+    (value): value is number => value === 0.5 || value === 1 || value === 2)
 
   /* --------------------------------------------------------- local state */
   const [fleetSize] = useState(Number(import.meta.env.VITE_FLEET_SIZE ?? 600) || 600)
@@ -122,6 +125,7 @@ export default function App() {
   // The clean mode is a class on <body> so the CSS can hide every panel.
   useEffect(() => {
     document.body.classList.toggle('ui-clean-mode', cleanMode)
+    if (cleanMode && document.activeElement instanceof HTMLElement) document.activeElement.blur()
   }, [cleanMode])
 
   /* ------------------------------------------------- photo and trail */
@@ -289,6 +293,11 @@ export default function App() {
         onError={setMapError}
       />
 
+      <div className="ui-overlay" inert={cleanMode} style={{
+        width: `${100 / uiScale}%`, height: `${100 / uiScale}%`,
+        transform: `scale(${uiScale})`,
+        '--ui-height': `calc(100dvh / ${uiScale})`,
+      } as CSSProperties}>
       <TopBar
         showHubs={gui.hubs}
         showClock={gui.clock}
@@ -399,9 +408,11 @@ export default function App() {
         />
       </footer>
 
-      {cleanMode && <button type="button" className="restore-ui panel" onClick={() => setCleanMode(false)}>Mostrar interfaz <kbd>U</kbd></button>}
+
 
       <SettingsModal
+        uiScale={uiScale}
+        onUiScaleChange={setUiScale}
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         providerId={providerId}
@@ -454,6 +465,7 @@ export default function App() {
           </button>
         </div>
       )}
+      </div>
     </div>
   )
 }

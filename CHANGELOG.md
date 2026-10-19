@@ -1,3 +1,16 @@
+## Correcciones de mapa, meteorología y escala — 2026-10-19
+
+- Los aviones sobreviven a un cambio de estilo: la fuente de repuesto recibe
+  datos de inmediato y cada recarga de estilo repone la capa de tráfico.
+- Accesos rápidos de aeropuertos de vuelta en la cabecera.
+- Ocultar UI oculta realmente toda la interfaz; se recupera con U.
+- Capas meteorológicas continuas: rejilla 7×7 de Open-Meteo interpolada en
+  un raster georreferenciado en lugar de bloques de color; la interpolación
+  no añade precisión observacional.
+- El selector Mapa de la barra inferior incluye los seis estilos.
+- Nuevo ajuste de tamaño de interfaz ×0.5 / ×1 / ×2, persistente y con
+  diseño adaptable al ancho escalado.
+
 ## Reorganización de interfaz — 2026-10-19
 
 - Cabecera con buscador amplio, acciones de tráfico y ajustes; aeropuertos en

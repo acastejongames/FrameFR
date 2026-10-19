@@ -501,7 +501,7 @@ select:focus-visible {
   margin-left: 12px;
   color: #8a97a8;
 }
-@media (max-width: 1100px) {
+@container (max-width: 1100px) {
   .utc-widget {
     display: none;
   }
@@ -520,7 +520,7 @@ select:focus-visible {
     right: 16px;
   }
 }
-@media (max-width: 700px) {
+@container (max-width: 700px) {
   :root {
     --chrome-top: 172px;
     --chrome-bottom: 120px;
@@ -666,7 +666,7 @@ select:focus-visible {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-@media (max-width: 700px) {
+@container (max-width: 700px) {
   .dock-label-wide {
     display: none;
   }
@@ -674,7 +674,7 @@ select:focus-visible {
     display: inline;
   }
 }
-@media (max-width: 380px) {
+@container (max-width: 380px) {
   .traffic-widget {
     display: none;
   }
@@ -687,4 +687,53 @@ select:focus-visible {
 .utc-widget[hidden],
 .traffic-widget[hidden] {
   display: none;
+}
+
+/* Scale the interface only: the map canvas keeps native screen coordinates. */
+.ui-overlay {
+  position: absolute; inset: 0 auto auto 0; transform-origin: top left;
+  pointer-events: none; container-type: size;
+  --chrome-top: 84px;
+}
+.ui-overlay > * { pointer-events: auto; }
+.ui-overlay > .map-footer { pointer-events: none; }
+body.ui-clean-mode .ui-overlay { visibility: hidden !important; pointer-events: none !important; }
+.app-topbar { gap: 12px; }
+.topbar-primary { flex: 1 1 320px; gap: 16px; }
+.airport-strip {
+  position: static; flex: 1 1 360px; min-width: 0; gap: 0;
+  pointer-events: auto;
+}
+.airport-strip-label { display: none; }
+.airport-hubs { min-width: 0; width: 100%; }
+.airport-hub-list { overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.airport-hubs > button { flex-shrink: 0; }
+.tool-popover { max-height: calc(var(--ui-height, 100dvh) - 210px); }
+.ui-overlay .flight-side-panel { top: var(--chrome-top); }
+@container (max-width: 1100px) {
+  .app-topbar { height: 116px; flex-wrap: wrap; align-content: center; row-gap: 8px; }
+  .airport-strip { order: 3; flex-basis: 100%; }
+  .topbar-primary { flex: 1; }
+  .utc-widget { display: none; }
+  .flight-side-panel { --chrome-top: 128px; }
+}
+@container (max-width: 700px) {
+  .app-topbar { height: 164px; padding: 12px; align-content: flex-start; }
+  .topbar-primary { flex: 1; }
+  .topbar-actions { gap: 4px; }
+  .traffic-widget { display: none; }
+  .header-action { min-width: 32px; padding: 0 8px; }
+  .header-action > span { display: none; }
+  .global-search { position: absolute; top: 62px; left: 12px; right: 12px; max-width: none; }
+  .airport-strip { position: absolute; top: 116px; left: 12px; right: 12px; width: auto; }
+  .flight-side-panel { --chrome-top: 176px; width: calc(100% - 24px); left: 12px; right: 12px; }
+  .map-dock { width: calc(100% - 24px); padding: 5px; gap: 0; }
+  .dock-button { min-width: 0; width: 100%; flex: 1; padding: 7px 3px; font-size: 9px; }
+  .tool-anchor { flex: 1; min-width: 0; }
+  .dock-divider, .dock-chevron, .dock-label-wide { display: none; }
+  .dock-label-small { display: inline; }
+  .tool-popover { width: 100%; max-width: 100%; padding: 14px; max-height: calc(var(--ui-height, 100dvh) - 290px); }
+  .status-telemetry { display: none; }
+  .status-legend { gap: 8px; font-size: 9px; }
+  .weather-option { flex-direction: column; }
 }
