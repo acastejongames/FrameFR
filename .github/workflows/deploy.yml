@@ -45,7 +45,7 @@ jobs:
           VITE_BASE_PATH: ${{ inputs.base_path || format('/{0}/', github.event.repository.name) }}
 
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
         # Enables GitHub Pages (source: GitHub Actions) the first time it runs.
         with:
           enablement: true
