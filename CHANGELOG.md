@@ -1,3 +1,25 @@
+## Vista 3D de aviones con modelos a escala 1:1 — 2026-10-19
+
+- Nueva **Vista 3D** en la ficha de la aeronave para las familias compatibles
+  **A320, A350, A380, B737 y B787** (incluye designadores ICAO asociados:
+  A318/A319/A321/A19N/A20N/A21N, A359/A35K, A388, B733-B739/B38M…, B788/B789).
+- Modelos GLB organizados en `src/assets/models/aircraft/` y normalizados en
+  tiempo de ejecución a la **longitud real** del avión: escala 1:1 garantizada
+  (37,6 m / 66,8 m / 72,7 m / 39,5 m / 56,7 m según familia).
+- El modelo se coloca a su **altitud real sobre el plano del mapa** (en tierra,
+  con las ruedas apoyadas) con línea de referencia al suelo, retícula kilométrica
+  deslizante, marca de norte y HUD con altitud en m/ft, rumbo, velocidad y
+  escala.
+- **Cámara orbital:** arrastra para orbitar alrededor del avión, rueda para
+  acercar, `Esc` para cerrar. El rumbo del modelo sigue el rumbo informado en
+  tiempo real.
+- Three.js y los GLB se cargan solo al abrir el visor (chunk diferido de
+  ~640 kB); la vista3D del mapa con inclinación sigue disponible y se llama
+  *Inclinación* en la ficha.
+- Nuevo `scripts/glb-inspect.mjs` (análisis de ejes/escala de modelos) y página
+  de desarrollo `model-check.html` que renderiza los cinco modelos.
+- La tabla de tráfico ya no muestra rumbos con decimales crudos.
+
 ## Ajustes por secciones, segundo plano y brújula — 2026-10-19
 
 - Tamaños de interfaz ×0.9 / ×1 / ×1.25; las preferencias antiguas ×0.5 y ×2

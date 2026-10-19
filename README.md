@@ -113,11 +113,18 @@ completa con:
   aeropuertos, reloj UTC, contador de aeronaves y ajustes.
 - **Panel izquierdo:** ficha de la aeronave seleccionada — fotografía, modelo,
   ruta, altitud, velocidad, régimen, perfil de altitud, estela y acciones
-  *Seguir* / *Vista 3D* / *Limpiar estela*.
+  *Seguir* / *Inclinación* / *Vista 3D* / *Limpiar estela*.
+- **Vista 3D del avión:** para aeronaves compatibles (familias **A320, A350,
+  A380, B737 y B787**) el botón *Vista 3D* abre un visor orbital con el modelo
+  a **escala 1:1** (longitud real: 37,6 m / 66,8 m / 72,7 m / 39,5 m / 56,7 m).
+  El avión se coloca a su **altitud real sobre el plano del mapa** —0 m con las
+  ruedas en tierra— con una línea de referencia y el rumbo al norte marcado.
+  Arrastra para **orbitar la cámara** alrededor del avión y usa la rueda para
+  acercarte; `Esc` cierra. El suelo deslizante muestra el avance sobre el mapa.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
   altitud, velocidad o indicativo.
 - **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
-  vista 3D, modo limpio y geolocalización. La pequeña brújula independiente
+  inclinación 3D, modo limpio y geolocalización. La pequeña brújula independiente
   restablece el norte al pulsarla sin cambiar centro, zoom ni inclinación.
 - **Navegación 3D manual:** mantén pulsado el botón central/rueda del ratón y
   mueve el puntero para girar e inclinar; el botón derecho ya no rota el mapa.
@@ -143,6 +150,7 @@ src/
 │  ├─ airlines.ts            #    Operadores, tipos y regiones
 │  ├─ airlineCodes.ts        #    ICAO → IATA + nombre de aerolínea
 │  ├─ aircraftTypes.ts       #    Tipos de aeronave y familias de silueta
+│  ├─ aircraft3d.ts          #    Registro de modelos 3D y escala 1:1
 │  ├─ category.ts            #    Clasificación comercial / carga / GA / militar
 │  ├─ hubs.ts                #    Accesos a aeropuertos (persistencia)
 │  ├─ globalSearch.ts        #    Búsqueda planetaria
@@ -171,6 +179,8 @@ src/
 │  ├─ TopBar.tsx            #    Marca, búsqueda, selector de proveedor
 │  ├─ AirportHubs.tsx       #    Accesos rápidos a aeropuertos
 │  ├─ HubsManager.tsx       #    Editor de accesos y carpetas
+│  └─ Aircraft3DViewer.tsx  #    Visor orbital 3D (chunk diferido con Three.js)
+├─ assets/models/aircraft/  # Modelos GLB: A320, A350, A380, B737, B787
 ├─ hooks/                    # Puente entre el controlador y React
 ├─ lib/                      # Formateadores y almacenamiento local
 └─ config.ts                 # Constantes y valores por defecto
@@ -223,6 +233,11 @@ interfaz necesitan cambios.
   una recta inventada.
 - Los sprites se generan en canvas: 24 iconos (8 familias × 3 estados) por
   menos de 4 KB de bundle.
+- Three.js y los modelos GLB solo se descargan al abrir la *Vista 3D*
+  (chunk `Aircraft3DViewer` diferido). El modelo se normaliza en tiempo de
+  ejecución a la longitud real de su variante: escala 1:1 garantizada aunque
+  cada GLB venga en unidades distintas. La página de desarrollo
+  `model-check.html` renderiza los cinco modelos con el registro real.
 - Probado para una resolución de referencia de 2560 × 1440.
 
 ## Meteorología y alcance de la migración

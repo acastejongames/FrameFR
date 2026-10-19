@@ -123,7 +123,7 @@ export function FlightTable({
                     {aircraft.onGround ? 'GND' : `${aircraft.altitude.toLocaleString('es-ES')} ft`}
                   </div>
                   <div className="text-[10px] text-white/40">
-                    {aircraft.groundSpeed} kts · {String(aircraft.heading).padStart(3, '0')}°
+                    {Math.round(aircraft.groundSpeed)} kts · {String(Math.round(aircraft.heading) % 360).padStart(3, '0')}°
                   </div>
                 </div>
               </button>

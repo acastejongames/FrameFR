@@ -1,5 +1,5 @@
 import { LayoutDashboard, Radar, Settings, SlidersHorizontal, X } from 'lucide-react'
-import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
   DEFAULT_MAX_AIRCRAFT,
   MAX_AIRCRAFT_OPTIONS,
@@ -84,15 +84,18 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
 
-  // Close with Escape.
+  // Close with Escape. A stable ref keeps the listener alive across parent
+  // re-renders so the key cannot be lost mid-dispatch.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
     if (!open) return
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 

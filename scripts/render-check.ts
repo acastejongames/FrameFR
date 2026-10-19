@@ -288,6 +288,65 @@ madButton!.click()
 await flush()
 expect(!container.textContent?.includes('Volando a'), 'sin aviso «Volando a» al mover la cámara')
 
+console.log('· Vista 3D con modelos orbitales…')
+const { matchAircraft3D } = await import('../src/data/aircraft3d')
+const tableTrigger = container.querySelector<HTMLButtonElement>('[aria-label="Tabla de tráfico"]')!
+tableTrigger.click()
+await flush()
+const typeTokenOf = (button: HTMLButtonElement): string | null => {
+  for (const span of button.querySelectorAll('span')) {
+    const token = span.textContent?.trim() ?? ''
+    if (/^[A-Za-z0-9]{3,5}$/.test(token) && matchAircraft3D(token)) return token
+  }
+  return null
+}
+const currentRows = (): HTMLButtonElement[] =>
+  [...container.querySelectorAll<HTMLButtonElement>('aside.flight-side-right button')].filter((button) =>
+    /kts/.test(button.textContent ?? ''),
+  )
+const compatibleRow = currentRows().find(typeTokenOf)
+expect(Boolean(compatibleRow), 'la tabla debe contener un avión con modelo 3D')
+compatibleRow!.click()
+await flush()
+await new Promise((resolve) => setTimeout(resolve, 600))
+const detailPanel = container.querySelector<HTMLElement>('aside.flight-side-left')!
+const viewerTrigger = [...detailPanel.querySelectorAll<HTMLButtonElement>('button')]
+  .find((button) => button.textContent?.trim() === 'Vista 3D')
+expect(Boolean(viewerTrigger), 'avión compatible muestra el botón Vista 3D')
+expect(
+  [...detailPanel.querySelectorAll<HTMLButtonElement>('button')].some(
+    (button) => button.textContent?.trim() === 'Inclinación',
+  ),
+  'el control de inclinación sigue disponible',
+)
+viewerTrigger!.click()
+await new Promise((resolve) => setTimeout(resolve, 900))
+const viewerDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label^="Vista 3D de"]')
+expect(Boolean(viewerDialog), 'el visor 3D abre su diálogo')
+expect(viewerDialog?.textContent?.includes('escala 1:1') ?? false, 'el visor declara la escala 1:1')
+expect(viewerDialog?.textContent?.includes('Altitud real') ?? false, 'el visor muestra la altitud real sobre el mapa')
+expect(viewerDialog?.textContent?.includes('orbitar') ?? false, 'el visor explica cómo orbitar la cámara')
+window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+await flush()
+expect(!container.querySelector('[role="dialog"][aria-label^="Vista 3D de"]'), 'Escape cierra el visor 3D')
+// The traffic table keeps re-rendering as the demo fleet moves; pick the
+// incompatible row from the live DOM immediately before clicking it.
+const incompatibleRow = currentRows().find(
+  (button) => !typeTokenOf(button) && !/Vista 3D/.test(button.textContent ?? ''),
+)
+if (incompatibleRow) {
+  incompatibleRow.click()
+  await flush()
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  const incompatiblePanel = container.querySelector<HTMLElement>('aside.flight-side-left')!
+  expect(
+    ![...incompatiblePanel.querySelectorAll<HTMLButtonElement>('button')].some(
+      (button) => button.textContent?.trim() === 'Vista 3D',
+    ),
+    'avión sin modelo no ofrece Vista 3D',
+  )
+}
+
 /* The critical runtime errors that must not appear. */
 const fatalPatterns = [
   'is not a function',

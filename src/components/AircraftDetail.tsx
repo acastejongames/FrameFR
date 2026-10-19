@@ -1,9 +1,12 @@
-import { Compass, Crosshair, Eraser, X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { Axis3d, Crosshair, Eraser, Orbit, X } from 'lucide-react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { matchAircraft3D, type Aircraft3DModel } from '@/data/aircraft3d'
 import type { AircraftPhoto } from '@/data/photos'
 import type { RenderAircraft } from '@/engine/fleetController'
 import { drawSilhouette, COLOR_STATES } from '@/map/silhouettes'
 import { formatAltitude, formatDistance, formatHeading, formatSpeed } from '@/lib/format'
+
+const Aircraft3DViewer = lazy(() => import('./Aircraft3DViewer'))
 
 interface AircraftDetailProps {
   aircraft: RenderAircraft
@@ -62,6 +65,13 @@ export function AircraftDetail({
 }: AircraftDetailProps) {
   const silhouetteRef = useRef<HTMLCanvasElement>(null)
   const phase = phaseOf(aircraft)
+  const model3d: Aircraft3DModel | null = matchAircraft3D(aircraft.type, aircraft.fullModel)
+  const [viewerOpen, setViewerOpen] = useState(false)
+
+  // Close the 3D viewer when the selection changes to another aircraft.
+  useEffect(() => {
+    setViewerOpen(false)
+  }, [aircraft.id])
 
   // Draw the silhouette of the aircraft family in the header.
   useEffect(() => {
@@ -330,11 +340,26 @@ export function AircraftDetail({
               ? 'bg-accent text-[#111317]'
               : 'border border-white/[0.09] bg-ink-700 text-white/75 hover:bg-ink-600 hover:text-white'
           }`}
-          title="Alternar la perspectiva inclinada 3D"
+          title="Alternar la perspectiva inclinada del mapa"
         >
-          <Compass className="h-3.5 w-3.5" />
-          Vista 3D
+          <Axis3d className="h-3.5 w-3.5" />
+          Inclinación
         </button>
+        {model3d && (
+          <button
+            type="button"
+            onClick={() => setViewerOpen(true)}
+            className={`tech flex flex-1 items-center justify-center gap-1.5 rounded py-2 px-2.5 text-xs font-bold transition ${
+              viewerOpen
+                ? 'bg-accent text-[#111317]'
+                : 'border border-accent/35 bg-ink-700 text-accent hover:bg-ink-600 hover:text-accent'
+            }`}
+            title={`Abrir la vista 3D del ${model3d.label} a escala 1:1`}
+          >
+            <Orbit className="h-3.5 w-3.5" />
+            Vista 3D
+          </button>
+        )}
         <button
           type="button"
           onClick={onClearTrail}
@@ -345,6 +370,26 @@ export function AircraftDetail({
           <Eraser className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {/* 3D orbit viewer for compatible aircraft (lazy: pulls in Three.js). */}
+      {viewerOpen && model3d && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80">
+              <div className="tech rounded border border-white/[0.09] bg-black/60 px-4 py-2.5 text-xs text-white/70">
+                Cargando visor 3D…
+              </div>
+            </div>
+          }
+        >
+          <Aircraft3DViewer
+            key={aircraft.id}
+            aircraft={aircraft}
+            model={model3d}
+            onClose={() => setViewerOpen(false)}
+          />
+        </Suspense>
+      )}
     </aside>
   )
 }

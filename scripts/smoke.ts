@@ -4,6 +4,12 @@ nodeGlobals.cancelAnimationFrame ??= () => undefined
 import { sampleGrid, rasterizeForecast } from '../src/data/weather/raster'
 import { FleetController, shouldCollectInBackground } from '../src/engine/fleetController'
 import { normalizeGuiVisibility, normalizeInterfaceScale } from '../src/config'
+import {
+  headingToRotationY,
+  matchAircraft3D,
+  modelAltitudeY,
+  modelScaleFor,
+} from '../src/data/aircraft3d'
 import { northResetDelta } from '../src/components/MapCompass'
 /**
  * Headless sanity check for the data layer.
@@ -462,6 +468,30 @@ console.log('· Ajustes, segundo plano y brújula…')
   check(!shouldCollectInBackground(false, true), 'segundo plano: no duplicar el bucle visible')
   check(northResetDelta(350) === 10 && northResetDelta(-350) === -10, 'brújula: giro corto al norte')
   check(northResetDelta(45) === -45 && northResetDelta(0) === 0, 'brújula: restablecer rumbo')
+}
+
+console.log('· Modelos 3D y vista orbital…')
+{
+  check(matchAircraft3D('A320')?.id === 'a320', '3D: A320 compatible')
+  check(matchAircraft3D('A20N')?.id === 'a320', '3D: A320neo compatible')
+  check(matchAircraft3D('A359')?.id === 'a350', '3D: A350-900 compatible')
+  check(matchAircraft3D('A350')?.id === 'a350', '3D: código suelto A350 compatible')
+  check(matchAircraft3D('A388')?.id === 'a380', '3D: A380 compatible')
+  check(matchAircraft3D('B738')?.id === 'b737', '3D: B737-800 compatible')
+  check(matchAircraft3D('B789')?.id === 'b787', '3D: B787-9 compatible')
+  check(matchAircraft3D('A333') === null, '3D: A330 sin modelo')
+  check(matchAircraft3D('B77W') === null, '3D: B777 sin modelo')
+  check(matchAircraft3D(undefined, 'Boeing 737 MAX 8')?.id === 'b737', '3D: nombre libre resuelve B737')
+  check(matchAircraft3D(undefined, 'Airbus A350-900')?.id === 'a350', '3D: nombre libre resuelve A350')
+  check(Math.abs(modelScaleFor(176, 72.72) - 0.4132) < 0.001, '3D: A380 normalizado a longitud real')
+  check(Math.abs(modelScaleFor(37.7, 37.57) - 0.9966) < 0.001, '3D: A320 normalizado a escala 1:1')
+  check(modelScaleFor(0, 40) === 1, '3D: dimensión inválida no divide entre cero')
+  check(Math.abs(headingToRotationY(0) - Math.PI / 2) < 1e-9, '3D: rumbo 0 apunta al norte')
+  check(Math.abs(headingToRotationY(90)) < 1e-9, '3D: rumbo 90 apunta al este')
+  check(Math.abs(headingToRotationY(180) + Math.PI / 2) < 1e-9, '3D: rumbo 180 apunta al sur')
+  check(Math.abs(modelAltitudeY(32808, false, 11) - 10000) < 0.5, '3D: altitud real en metros sobre el mapa')
+  check(modelAltitudeY(0, true, 11) === 5.5, '3D: en tierra las ruedas tocan el mapa')
+  check(modelAltitudeY(0, false, 11) === 5.5, '3D: altitud 0 se trata como suelo')
 }
 
 if (failures > 0) {
