@@ -1,3 +1,10 @@
+## Corrección del worker de MapLibre
+
+- Empaquetado explícito del worker de MapLibre 6 y sus dependencias con Vite.
+- URL con hash y ruta base de Pages, configurada antes de crear el mapa.
+- Comprobación del artefacto del worker en cada build para evitar regresiones
+  que el test de interfaz con MapLibre simulado no puede detectar.
+
 ## 0.2.0 — 2026-10-19
 
 - Integración modular de meteorología del HTML AeroScope: radar RainViewer y

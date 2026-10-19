@@ -6,7 +6,7 @@
   "description": "FrameFR \u2014 seguimiento de tr\u00e1fico a\u00e9reo en tiempo real sobre un mapa interactivo (React + TypeScript + Vite + MapLibre GL)",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/postbuild.mjs",
+    "build": "tsc -b && vite build && node scripts/postbuild.mjs && node scripts/check-worker.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --force",
     "smoke": "vite build --config smoke.config.ts --logLevel error && node dist-smoke/smoke.js",
