@@ -112,18 +112,24 @@ completa con:
 - **Barra superior:** marca, buscador global (`/` para enfocarlo), accesos a
   aeropuertos, reloj UTC, contador de aeronaves y ajustes.
 - **Panel izquierdo:** ficha de la aeronave seleccionada — fotografía, modelo,
-  ruta, altitud, velocidad, régimen, perfil de altitud, estela, zoom de
-  seguimiento y acciones *Seguir* / *Vista 3D* / *Limpiar estela*.
+  ruta, altitud, velocidad, régimen, perfil de altitud, estela y acciones
+  *Seguir* / *Vista 3D* / *Limpiar estela*.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
   altitud, velocidad o indicativo.
 - **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
-  vista 3D, modo limpio y geolocalización.
-- **Ajustes:** proveedor de datos, frecuencia de sondeo, límite de
-  aeronaves, estilo del mapa, orden de la tabla y visibilidad de cada panel.
+  vista 3D, modo limpio y geolocalización. La pequeña brújula independiente
+  restablece el norte al pulsarla sin cambiar centro, zoom ni inclinación.
+- **Navegación 3D manual:** mantén pulsado el botón central/rueda del ratón y
+  mueve el puntero para girar e inclinar; el botón derecho ya no rota el mapa.
+- **Ajustes:** tres pestañas —**General** (actualizaciones en segundo plano,
+  límite de aeronaves y orden), **Interfaz** (tamaño ×0.9/×1/×1.25, elementos
+  visibles incluida la brújula, etiquetas y estilo) y **Telemetría**
+  (proveedor y frecuencia ADS-B).
 - **Atajos:** `/` busca · `U` modo limpio · `Esc` cierra.
 
 Todo se guarda en el navegador: al recargar recuperas el proveedor, la
-frecuencia, los accesos de aeropuertos y el estado de la interfaz.
+frecuencia, los accesos de aeropuertos, el tamaño de la interfaz y si la
+telemetría continúa mientras la pestaña abierta está oculta.
 
 ## 🏗️ Arquitectura
 
@@ -152,7 +158,9 @@ src/
 │     ├─ autoProvider.ts     #    Carrera multi-red y fusión
 │     └─ jsonp.ts            #    Transporte JSONP
 ├─ engine/
-│  └─ fleetController.ts     # Informes exactos, renderizado y publicación
+│  ├─ fleetController.ts     # Informes exactos, renderizado y publicación
+│  ├─ backgroundTicker.ts    # Latido para pestañas ocultas (con fallback)
+│  └─ backgroundTicker.worker.ts # Worker del latido en segundo plano
 ├─ map/
 │  ├─ style.ts               #    Estilos y elementos del mapa base
 │  ├─ silhouettes.ts         #    Siluetas dibujadas en canvas
@@ -196,6 +204,10 @@ motor:
 3. Solo empuja GeoJSON a MapLibre cuando cambia un informe (descartando
    instantáneas intermedias obsoletas) y publica en React unas dos veces por
    segundo.
+4. Si **Actualizaciones en segundo plano** está activado, un worker mantiene
+   el sondeo cuando la pestaña sigue abierta pero oculta/minimizada. Ingiere
+   los informes y la estela del avión seleccionado sin dibujar ni publicar en
+   React hasta volver; al desactivarlo se pausa para ahorrar recursos.
 
 **Añadir otro proveedor** consiste en crear una clase que implemente
 `AircraftProvider` y registrarla en `src/data/registry.ts`. Ni el motor ni la
@@ -203,9 +215,12 @@ interfaz necesitan cambios.
 
 ### Rendimiento
 
-- Un único bucle de animación (`requestAnimationFrame`), aislado de React.
+- Un único bucle visible (`requestAnimationFrame`), aislado de React; el
+  worker de segundo plano solo recoge datos y no renderiza la interfaz oculta.
 - La tabla de tráfico renderiza como máximo 120 filas.
-- La estela se calcula únicamente para la aeronave seleccionada.
+- La estela se calcula únicamente para la aeronave seleccionada. Un hueco de
+  informes superior a dos minutos se dibuja como segmentos separados, no como
+  una recta inventada.
 - Los sprites se generan en canvas: 24 iconos (8 familias × 3 estados) por
   menos de 4 KB de bundle.
 - Probado para una resolución de referencia de 2560 × 1440.

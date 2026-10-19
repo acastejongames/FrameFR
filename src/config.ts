@@ -77,6 +77,7 @@ export interface GuiVisibility {
   clock: boolean
   counter: boolean
   hubs: boolean
+  compass: boolean
   legend: boolean
   bottomControls: boolean
 }
@@ -85,8 +86,43 @@ export const DEFAULT_GUI_VISIBILITY: GuiVisibility = {
   clock: true,
   counter: true,
   hubs: true,
+  compass: true,
   legend: true,
   bottomControls: true,
+}
+
+/** The only interface scales offered by the settings. */
+export const INTERFACE_SCALES = [0.9, 1, 1.25] as const
+export type InterfaceScale = (typeof INTERFACE_SCALES)[number]
+
+/**
+ * Migrates a stored scale to the nearest supported one. This also turns the
+ * former ×0.5 / ×2 preferences into ×0.9 / ×1.25 instead of discarding the
+ * user's relative choice (smaller or larger than normal).
+ */
+export function normalizeInterfaceScale(value: unknown): InterfaceScale {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return 1
+  return INTERFACE_SCALES.reduce<InterfaceScale>(
+    (closest, scale) => (Math.abs(scale - numeric) < Math.abs(closest - numeric) ? scale : closest),
+    1,
+  )
+}
+
+/** Merges visibility objects saved by older versions with current defaults. */
+export function normalizeGuiVisibility(value: unknown): GuiVisibility {
+  if (!value || typeof value !== 'object') return { ...DEFAULT_GUI_VISIBILITY }
+  const stored = value as Partial<Record<keyof GuiVisibility, unknown>>
+  const booleanOrDefault = (key: keyof GuiVisibility): boolean =>
+    typeof stored[key] === 'boolean' ? stored[key] : DEFAULT_GUI_VISIBILITY[key]
+  return {
+    clock: booleanOrDefault('clock'),
+    counter: booleanOrDefault('counter'),
+    hubs: booleanOrDefault('hubs'),
+    compass: booleanOrDefault('compass'),
+    legend: booleanOrDefault('legend'),
+    bottomControls: booleanOrDefault('bottomControls'),
+  }
 }
 
 /** How the traffic table is sorted. */

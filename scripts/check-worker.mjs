@@ -22,4 +22,14 @@ const scripts = await Promise.all(files.filter(name => /^index-.*\.js$/.test(nam
 assert(scripts.some(script => script.includes(workerPath)),
   `Application bundle must reference the emitted worker at ${workerPath}`)
 assert(!source.includes('from"./maplibre-gl-shared'), 'Worker dependencies must be bundled')
-console.log(`worker check: ${join('dist/assets', worker)} present, parseable and referenced with base ${base}`)
+
+const backgroundWorkers = files.filter(name => /^backgroundTicker\.worker-.*\.js$/.test(name))
+assert.equal(backgroundWorkers.length, 1, 'The production build must contain the background ticker worker')
+const backgroundWorker = backgroundWorkers[0]
+const backgroundSource = await readFile(new URL(backgroundWorker, assets), 'utf8')
+new Script(backgroundSource, { filename: backgroundWorker })
+const backgroundWorkerPath = `${base.replace(/\/$/, '')}/assets/${backgroundWorker}`
+assert(scripts.some(script => script.includes(backgroundWorkerPath)),
+  `Application bundle must reference the background ticker at ${backgroundWorkerPath}`)
+
+console.log(`worker check: ${join('dist/assets', worker)} and ${backgroundWorker} present, parseable and referenced with base ${base}`)

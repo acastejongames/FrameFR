@@ -6,16 +6,74 @@
  * plausible viewport and swallows every styling call.
  */
 
+interface FakeCanvas {
+  style: Record<string, string>
+  addEventListener: (event: string, handler: (event: never) => void) => void
+  removeEventListener: (event: string, handler: (event: never) => void) => void
+  dispatchEvent: (event: { type: string }) => boolean
+  setPointerCapture: () => void
+  hasPointerCapture: () => boolean
+  releasePointerCapture: () => void
+}
+
 export class Map {
+  static instances: Map[] = []
+
   container: unknown
   style: unknown
+  options: Record<string, unknown>
+  dragPan = { enable: () => undefined, disable: () => undefined }
   // NOTE: the field cannot be called `Map`: inside the class body the name
   // would resolve to the class itself instead of the global constructor.
   private handlers = new globalThis.Map<string, Set<(payload?: unknown) => void>>()
+  private center = { lat: 40.2, lng: -3.7 }
+  private zoom = 6.6
+  private pitch = 0
+  private bearing = 0
+  private maxPitch = 70
+  private canvasListeners = new globalThis.Map<string, Set<(event: never) => void>>()
+  private canvas: FakeCanvas = {
+    style: {},
+    addEventListener: (event, handler) => {
+      const handlers = this.canvasListeners.get(event) ?? new Set()
+      handlers.add(handler)
+      this.canvasListeners.set(event, handlers)
+    },
+    removeEventListener: (event, handler) => {
+      this.canvasListeners.get(event)?.delete(handler)
+    },
+    dispatchEvent: (event) => {
+      for (const handler of this.canvasListeners.get(event.type) ?? []) {
+        handler(event as never)
+      }
+      return true
+    },
+    setPointerCapture: () => undefined,
+    hasPointerCapture: () => false,
+    releasePointerCapture: () => undefined,
+  }
 
-  constructor(options: { container?: unknown; style?: unknown } = {}) {
+  constructor(
+    options: {
+      container?: unknown
+      style?: unknown
+      center?: [number, number]
+      zoom?: number
+      pitch?: number
+      bearing?: number
+      maxPitch?: number
+      dragRotate?: boolean
+    } = {},
+  ) {
     this.container = options.container
     this.style = options.style
+    this.options = options as Record<string, unknown>
+    if (options.center) this.center = { lng: options.center[0], lat: options.center[1] }
+    if (typeof options.zoom === 'number') this.zoom = options.zoom
+    if (typeof options.pitch === 'number') this.pitch = options.pitch
+    if (typeof options.bearing === 'number') this.bearing = options.bearing
+    if (typeof options.maxPitch === 'number') this.maxPitch = options.maxPitch
+    Map.instances.push(this)
     // MapLibre fires `load` and `style.load` once the style is ready.
     setTimeout(() => {
       this.emit('style.load')
@@ -45,20 +103,28 @@ export class Map {
     this.handlers.clear()
   }
 
-  getCanvas(): { style: Record<string, string> } {
-    return { style: {} }
+  getCanvas(): FakeCanvas {
+    return this.canvas
   }
 
   getCenter(): { lat: number; lng: number } {
-    return { lat: 40.2, lng: -3.7 }
+    return { ...this.center }
   }
 
   getZoom(): number {
-    return 6.6
+    return this.zoom
   }
 
   getPitch(): number {
-    return 0
+    return this.pitch
+  }
+
+  getBearing(): number {
+    return this.bearing
+  }
+
+  getMaxPitch(): number {
+    return this.maxPitch
   }
 
   getBounds(): {
@@ -101,7 +167,9 @@ export class Map {
   setLayoutProperty(): void {}
   setPaintProperty(): void {}
   setFilter(): void {}
-  setMaxPitch(): void {}
+  setMaxPitch(maxPitch: number): void {
+    this.maxPitch = maxPitch
+  }
   setStyle(): void {}
   isStyleLoaded(): boolean {
     return true
@@ -109,9 +177,29 @@ export class Map {
   queryRenderedFeatures(): unknown[] {
     return []
   }
-  easeTo(): void {}
-  flyTo(): void {}
-  jumpTo(): void {}
+  easeTo(options: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number } = {}): void {
+    this.applyCamera(options)
+  }
+  flyTo(options: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number } = {}): void {
+    this.applyCamera(options)
+  }
+  jumpTo(options: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number } = {}): void {
+    this.applyCamera(options)
+  }
+
+  private applyCamera(options: {
+    center?: [number, number]
+    zoom?: number
+    pitch?: number
+    bearing?: number
+  }): void {
+    if (options.center) this.center = { lng: options.center[0], lat: options.center[1] }
+    if (typeof options.zoom === 'number') this.zoom = options.zoom
+    if (typeof options.pitch === 'number') this.pitch = options.pitch
+    if (typeof options.bearing === 'number') this.bearing = options.bearing
+    this.emit('rotate')
+    this.emit('move')
+  }
 }
 
 export class Popup {

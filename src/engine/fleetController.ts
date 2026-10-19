@@ -18,6 +18,13 @@ import {
 import { aircraftIconId } from '@/map/aircraftIcons'
 import { bandKey } from '@/map/palette'
 import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl'
+import {
+  createBackgroundTicker,
+  shouldCollectInBackground,
+  type BackgroundTicker,
+} from './backgroundTicker'
+
+export { shouldCollectInBackground }
 
 export interface FleetFilters {
   /** Free text matched against callsign, operator, registration, type or hex. */
@@ -69,6 +76,8 @@ export interface FleetControllerOptions {
   providerId: ProviderId
   fleetSize: number
   filters?: FleetFilters
+  /** Continue polling while the tab remains open but hidden. Defaults to true. */
+  backgroundUpdates?: boolean
   onFollowChange?: (follow: boolean) => void
 }
 
@@ -89,6 +98,13 @@ interface Track {
   lastSeenAt: number
   /** Trail history as [lon, lat] pairs (only filled for the selection). */
   history: Array<[number, number]>
+  /**
+   * Indexes in the combined drawable trail (external base + live history)
+   * where a new, disconnected segment starts.
+   */
+  historyBreaks: Set<number>
+  /** Observation time of the newest point in the live trail. */
+  lastTrailObservedAt: number
   /** Altitude of every point of the trail, in feet (parallel to `history`). */
   altitudes: number[]
   /**
@@ -115,6 +131,7 @@ export const EMPTY_SNAPSHOT: FleetSnapshot = {
  *
  * Responsibilities:
  *  - advance simulated providers and poll live ones at their own cadence,
+ *  - optionally keep collecting reports while the open tab is hidden,
  *  - render the newest reported position only (no dead reckoning),
  *  - push a GeoJSON snapshot to MapLibre only when a report changes it,
  *    React (~2 fps), so the UI never re-renders at animation speed.
@@ -133,7 +150,10 @@ export class FleetController {
   private normalizedQuery = ''
 
   private raf = 0
-  private lastFrame = 0
+  private lastSimulationAt = 0
+  private running = false
+  private backgroundUpdates: boolean
+  private backgroundTicker: BackgroundTicker | null = null
   private lastPollAt = 0
   private renderDirty = true
   private lastUiAt = 0
@@ -160,6 +180,7 @@ export class FleetController {
     this.map = options.map
     this.providerId = options.providerId
     this.fleetSize = options.fleetSize
+    this.backgroundUpdates = options.backgroundUpdates ?? true
     this.onFollowChange = options.onFollowChange
     if (options.filters) this.setFilters(options.filters)
     this.provider = createProvider(options.providerId, { fleetSize: options.fleetSize })
@@ -179,19 +200,55 @@ export class FleetController {
   }
 
   start(): void {
-    this.lastFrame = performance.now()
+    if (this.running) return
+    this.running = true
+    const now = performance.now()
+    this.lastSimulationAt = now
     this.raf = requestAnimationFrame(this.loop)
     this.map.on('dragstart', this.handleUserDrag)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.handleVisibilityChange)
+      if (document.hidden) this.startBackgroundTicker()
+    }
     void this.poll()
   }
 
   destroy(): void {
+    this.running = false
     cancelAnimationFrame(this.raf)
+    this.stopBackgroundTicker()
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange)
+    }
     this.map.off('dragstart', this.handleUserDrag)
     this.abort?.abort()
     this.provider.dispose?.()
     this.tracks.clear()
     this.listeners.clear()
+  }
+
+  /**
+   * Enables or disables data collection while the tab is hidden. Disabling it
+   * is the low-power mode: the worker heartbeat stops and an in-flight hidden
+   * poll is cancelled instead of continuing to consume network/CPU time.
+   */
+  setBackgroundUpdates(enabled: boolean): void {
+    const wasEnabled = this.backgroundUpdates
+    this.backgroundUpdates = enabled
+    const hidden = typeof document !== 'undefined' && document.hidden
+    if (!enabled) {
+      this.stopBackgroundTicker()
+      if (hidden) this.abort?.abort()
+      return
+    }
+    if (!wasEnabled) {
+      const now = performance.now()
+      this.lastSimulationAt = now
+    }
+    if (hidden && this.running) {
+      this.startBackgroundTicker()
+      this.backgroundStep()
+    }
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -213,17 +270,17 @@ export class FleetController {
   setSelected(id: string | null): void {
     if (this.selectedId === id) return
     const previous = this.selectedId ? this.tracks.get(this.selectedId) : undefined
-    if (previous) {
-      previous.history = []
-      previous.altitudes = []
-      previous.externalTrail = null
-    }
+    if (previous) resetLiveTrail(previous)
     this.selectedId = id
     const next = id ? this.tracks.get(id) : undefined
     if (next) {
-      next.history = []
-      next.altitudes = []
-      next.externalTrail = null
+      resetLiveTrail(next)
+      // Seed the live trail with the already-reported position, so collection
+      // can continue seamlessly if the tab is hidden immediately afterwards.
+      next.history.push([next.reported.lon, next.reported.lat])
+      next.altitudes.push(next.reported.alt)
+      next.lastTrailObservedAt =
+        Number.isFinite(next.ac.observedAt) && next.ac.observedAt > 0 ? next.ac.observedAt : Date.now()
     }
     this.renderDirty = true
     this.lastUiAt = 0
@@ -300,13 +357,19 @@ export class FleetController {
    *
    * Live feeds only report the current position, so the trail drawn behind the
    * selected aircraft is rebuilt from the Flightradar24 detail payload or from
-   * the OpenSky track history. When such a trail is available it replaces the
-   * "live" accumulation, which only covers the last few minutes.
+   * the OpenSky track history. That trajectory becomes the base; live reports
+   * received from this moment on (including while the tab is hidden) continue
+   * it point by point instead of leaving one long straight segment to "now".
    */
   setExternalTrail(id: string, points: Array<{ lon: number; lat: number; altitude: number }>): void {
     const track = this.tracks.get(id)
     if (!track || points.length < 2) return
-    track.externalTrail = points
+    track.externalTrail = points.map((point) => ({ ...point }))
+    track.history = [[track.reported.lon, track.reported.lat]]
+    track.historyBreaks.clear()
+    track.altitudes = [track.reported.alt]
+    track.lastTrailObservedAt =
+      Number.isFinite(track.ac.observedAt) && track.ac.observedAt > 0 ? track.ac.observedAt : Date.now()
     this.renderDirty = true
     this.lastUiAt = 0
   }
@@ -346,6 +409,8 @@ export class FleetController {
         hay: searchCorpus(aircraft),
         lastSeenAt: now,
         history: [],
+        historyBreaks: new Set<number>(),
+        lastTrailObservedAt: 0,
         altitudes: [],
         externalTrail: null,
       })
@@ -359,7 +424,7 @@ export class FleetController {
     const track = this.tracks.get(id)
     if (!track) return []
     if (track.externalTrail && track.externalTrail.length > 1) {
-      return track.externalTrail.map((point) => point.altitude)
+      return [...track.externalTrail.map((point) => point.altitude), ...track.altitudes]
     }
     return [...track.altitudes]
   }
@@ -368,9 +433,7 @@ export class FleetController {
   clearExternalTrail(id: string): void {
     const track = this.tracks.get(id)
     if (!track) return
-    track.externalTrail = null
-    track.history = []
-    track.altitudes = []
+    resetLiveTrail(track)
     this.renderDirty = true
     this.lastUiAt = 0
   }
@@ -395,10 +458,17 @@ export class FleetController {
 
   private readonly loop = (now: number): void => {
     this.raf = requestAnimationFrame(this.loop)
-    const dt = Math.min(now - this.lastFrame, 1000)
-    this.lastFrame = now
 
-    this.provider.advance?.(dt * this.speedFactor)
+    // RAF is normally suspended in a hidden tab, but a few browsing contexts
+    // still deliver occasional frames. Treat those exactly like the worker
+    // heartbeat: collect observations, but do not spend time drawing a map or
+    // publishing React snapshots that nobody can see.
+    if (this.isHidden()) {
+      this.backgroundStep(now)
+      return
+    }
+
+    this.advanceSimulation(now, 1000)
 
     if (!this.polling && now - this.lastPollAt >= this.pollDelay) {
       void this.poll()
@@ -421,6 +491,66 @@ export class FleetController {
     }
   }
 
+  private isHidden(): boolean {
+    return typeof document !== 'undefined' && document.hidden
+  }
+
+  private advanceSimulation(now: number, maxStepMs: number): void {
+    if (!this.lastSimulationAt) {
+      this.lastSimulationAt = now
+      return
+    }
+    const elapsed = Math.min(Math.max(now - this.lastSimulationAt, 0), maxStepMs)
+    this.lastSimulationAt = now
+    if (elapsed > 0) this.provider.advance?.(elapsed * this.speedFactor)
+  }
+
+  /** One hidden-tab heartbeat: advance simulated feeds and poll real ones. */
+  private backgroundStep(now = performance.now()): void {
+    if (!this.running || !shouldCollectInBackground(this.isHidden(), this.backgroundUpdates)) return
+    // A worker may still be coalesced by a power-saving browser. Advance up to
+    // a minute at once, but never synthesize an aircraft coordinate here: the
+    // provider is the only component that creates/returns observations.
+    this.advanceSimulation(now, 60_000)
+    if (!this.polling && now - this.lastPollAt >= this.pollDelay) {
+      void this.poll()
+    }
+  }
+
+  private startBackgroundTicker(): void {
+    if (this.backgroundTicker || !this.backgroundUpdates || !this.running) return
+    this.backgroundTicker = createBackgroundTicker(() => this.backgroundStep())
+  }
+
+  private stopBackgroundTicker(): void {
+    this.backgroundTicker?.stop()
+    this.backgroundTicker = null
+  }
+
+  private readonly handleVisibilityChange = (): void => {
+    const now = performance.now()
+    this.lastSimulationAt = now
+
+    if (this.isHidden()) {
+      if (this.backgroundUpdates) {
+        this.startBackgroundTicker()
+      } else {
+        this.stopBackgroundTicker()
+        this.abort?.abort()
+      }
+      return
+    }
+
+    // Visible again: RAF takes over. Publish the newest reports collected in
+    // the background on the next frame; with background updates disabled,
+    // force a fresh poll. Trail gaps created while disabled are deliberately
+    // left disconnected rather than joined with a misleading straight line.
+    this.stopBackgroundTicker()
+    this.renderDirty = true
+    this.lastUiAt = 0
+    if (!this.backgroundUpdates) this.lastPollAt = 0
+  }
+
   private readViewport(): Viewport {
     const bounds = this.map.getBounds()
     const center = this.map.getCenter()
@@ -439,16 +569,17 @@ export class FleetController {
   }
 
   private async poll(): Promise<void> {
-    if (this.polling) return
+    if (this.polling || (this.isHidden() && !this.backgroundUpdates)) return
     this.polling = true
     this.lastPollAt = performance.now()
-    this.abort = new AbortController()
+    const abort = new AbortController()
+    this.abort = abort
     const started = performance.now()
     if (this.status.state !== 'live') {
       this.status = { ...this.status, state: 'loading' }
     }
     try {
-      const list = await this.provider.poll(this.readViewport(), this.abort.signal)
+      const list = await this.provider.poll(this.readViewport(), abort.signal)
       this.ingest(list, performance.now())
       const source = this.provider.activeSource
       const notice = this.provider.notice
@@ -460,13 +591,17 @@ export class FleetController {
       }
       this.pollDelay = this.pollIntervalMs
     } catch (error) {
-      this.status = {
-        state: 'error',
-        message: error instanceof Error ? error.message : 'Error desconocido',
-        lastUpdate: this.status.lastUpdate,
+      const aborted =
+        abort.signal.aborted || (error instanceof Error && error.name === 'AbortError')
+      if (!aborted) {
+        this.status = {
+          state: 'error',
+          message: error instanceof Error ? error.message : 'Error desconocido',
+          lastUpdate: this.status.lastUpdate,
+        }
+        // Back off a little before retrying a failing feed.
+        this.pollDelay = Math.max(this.pollIntervalMs, 15_000)
       }
-      // Back off a little before retrying a failing feed.
-      this.pollDelay = Math.max(this.pollIntervalMs, 15_000)
     } finally {
       this.polling = false
     }
@@ -487,6 +622,8 @@ export class FleetController {
           hay: searchCorpus(ac),
           lastSeenAt: now,
           history: [],
+          historyBreaks: new Set<number>(),
+          lastTrailObservedAt: 0,
           altitudes: [],
           externalTrail: null,
         })
@@ -511,11 +648,40 @@ export class FleetController {
       if (ac.id === this.selectedId && positionChanged) {
         const last = existing.history.at(-1)
         if (!last || last[0] !== reported.lon || last[1] !== reported.lat) {
+          const observedAt =
+            Number.isFinite(ac.observedAt) && ac.observedAt > 0 ? ac.observedAt : Date.now()
+          const maxContinuousGapMs = Math.max(120_000, this.pollDelay * 4)
+          if (
+            existing.history.length > 0 &&
+            existing.lastTrailObservedAt > 0 &&
+            observedAt - existing.lastTrailObservedAt > maxContinuousGapMs
+          ) {
+            // A missing interval (background collection off, browser throttling
+            // or feed outage) is a break in evidence. Start a new segment here
+            // instead of drawing a fabricated straight route across the gap.
+            // Break indexes address external base + live history combined.
+            existing.historyBreaks.add((existing.externalTrail?.length ?? 0) + existing.history.length)
+          }
           existing.history.push([reported.lon, reported.lat])
           existing.altitudes.push(reported.alt)
+          existing.lastTrailObservedAt = Math.max(existing.lastTrailObservedAt, observedAt)
           if (existing.history.length > TRAIL_LENGTH) {
-            existing.history.shift()
-            existing.altitudes.shift()
+            const shifted = existing.history.shift()
+            const shiftedAltitude = existing.altitudes.shift()
+            if (existing.externalTrail && shifted) {
+              // Move the oldest live point into the historical base. The
+              // combined sequence keeps the same indexes, so segment breaks
+              // remain correct while the live window stays bounded.
+              existing.externalTrail.push({
+                lon: shifted[0],
+                lat: shifted[1],
+                altitude: shiftedAltitude ?? reported.alt,
+              })
+            } else {
+              existing.historyBreaks = new Set(
+                [...existing.historyBreaks].map((index) => index - 1).filter((index) => index > 0),
+              )
+            }
           }
         }
       }
@@ -610,34 +776,51 @@ export class FleetController {
   /**
    * Builds the GeoJSON line of the selected aircraft.
    *
-   * The historical trajectory (when it could be downloaded) wins over the live
-   * accumulation, because it covers the whole flight and not only the last
-   * couple of minutes.
+   * A downloaded historical trajectory is the base and the live accumulation
+   * continues it. Without that base, the live accumulation is used on its own.
+   * Recorded breaks become separate MultiLineString parts.
    */
   private buildTrailLine(track: Track | undefined): TrailFeature | null {
     if (!track) return null
 
-    if (track.externalTrail && track.externalTrail.length > 1) {
-      const coordinates: Array<[number, number]> = track.externalTrail.map((point) => [
-        point.lon,
-        point.lat,
-      ])
-      coordinates.push([track.reported.lon, track.reported.lat])
-      return { type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: {} }
-    }
+    const externalCoordinates =
+      track.externalTrail && track.externalTrail.length > 1
+        ? track.externalTrail.map((point): [number, number] => [point.lon, point.lat])
+        : []
+    const points: Array<[number, number]> = [
+      ...externalCoordinates,
+      ...track.history,
+      [track.reported.lon, track.reported.lat],
+    ]
+    if (points.length === 0) return null
 
-    if (track.history.length > 1) {
+    const segments: Array<Array<[number, number]>> = []
+    let segment: Array<[number, number]> = []
+    points.forEach((point, index) => {
+      if (index > 0 && track.historyBreaks.has(index)) {
+        segments.push(segment)
+        segment = []
+      }
+      segment.push(point)
+    })
+    segments.push(segment)
+
+    const drawable = segments
+      .map(cleanCoordinates)
+      .filter((coordinates) => coordinates.length > 1)
+    if (drawable.length === 0) return null
+    if (drawable.length === 1) {
       return {
         type: 'Feature',
-        geometry: {
-          type: 'LineString',
-          coordinates: [...track.history, [track.reported.lon, track.reported.lat]],
-        },
+        geometry: { type: 'LineString', coordinates: drawable[0] },
         properties: {},
       }
     }
-
-    return null
+    return {
+      type: 'Feature',
+      geometry: { type: 'MultiLineString', coordinates: drawable },
+      properties: {},
+    }
   }
 
   /** Recompute the React-visible snapshot and notify subscribers. */
@@ -696,6 +879,23 @@ export class FleetController {
     }
     for (const listener of this.listeners) listener()
   }
+}
+
+function resetLiveTrail(track: Track): void {
+  track.history = []
+  track.historyBreaks.clear()
+  track.lastTrailObservedAt = 0
+  track.altitudes = []
+  track.externalTrail = null
+}
+
+function cleanCoordinates(points: Array<[number, number]>): Array<[number, number]> {
+  const coordinates: Array<[number, number]> = []
+  for (const point of points) {
+    const previous = coordinates.at(-1)
+    if (!previous || previous[0] !== point[0] || previous[1] !== point[1]) coordinates.push(point)
+  }
+  return coordinates
 }
 
 function samePos(a: Pos, b: Pos): boolean {

@@ -2,7 +2,9 @@ const nodeGlobals = globalThis as typeof globalThis & { requestAnimationFrame?: 
 nodeGlobals.requestAnimationFrame ??= () => 0
 nodeGlobals.cancelAnimationFrame ??= () => undefined
 import { sampleGrid, rasterizeForecast } from '../src/data/weather/raster'
-import { FleetController } from '../src/engine/fleetController'
+import { FleetController, shouldCollectInBackground } from '../src/engine/fleetController'
+import { normalizeGuiVisibility, normalizeInterfaceScale } from '../src/config'
+import { northResetDelta } from '../src/components/MapCompass'
 /**
  * Headless sanity check for the data layer.
  *
@@ -358,6 +360,40 @@ console.log('· Enriquecimiento con el código de aerolínea…')
   check(sourceSets.at(-1)?.[0] === 'fresh' && sourceSets.at(-1)?.[1] === 2, 'fuente de repuesto recibe los aviones')
   controller.restoreStyle()
   check(sourceSets.at(-1)?.[0] === 'fresh' && sourceSets.at(-1)?.[1] === 2, 'restoreStyle repone los aviones tras cambiar el mapa')
+
+  const trailInternals = controller as unknown as {
+    ingest: (list: Aircraft[], now: number) => void
+    buildTrailLine: (track: unknown) => { geometry: { type: string; coordinates: unknown } } | null
+    tracks: Map<string, unknown>
+  }
+  controller.setSelected('test1')
+  trailInternals.ingest([{ ...base, lat: 42.1, lon: -2.9, observedAt: 10_000 }], performance.now())
+  const selectedTrack = trailInternals.tracks.get('test1')
+  check(trailInternals.buildTrailLine(selectedTrack)?.geometry.type === 'LineString', 'estela: informes seguidos forman una línea')
+  trailInternals.ingest([{ ...base, lat: 43, lon: -2, observedAt: 200_000 }], performance.now())
+  trailInternals.ingest([{ ...base, lat: 43.1, lon: -1.9, observedAt: 206_000 }], performance.now())
+  const brokenTrail = trailInternals.buildTrailLine(selectedTrack)
+  check(
+    brokenTrail?.geometry.type === 'MultiLineString' &&
+      Array.isArray(brokenTrail.geometry.coordinates) &&
+      brokenTrail.geometry.coordinates.length === 2,
+    'estela: un hueco largo no se une con una recta inventada',
+  )
+  controller.setExternalTrail('test1', [
+    { lon: -4, lat: 39, altitude: 30000 },
+    { lon: -3, lat: 40, altitude: 30000 },
+  ])
+  trailInternals.ingest([{ ...base, lat: 43.2, lon: -1.8, observedAt: 212_000 }], performance.now())
+  const continuedTrail = trailInternals.buildTrailLine(selectedTrack)
+  check(
+    continuedTrail?.geometry.type === 'LineString' &&
+      Array.isArray(continuedTrail.geometry.coordinates) &&
+      continuedTrail.geometry.coordinates.length === 4 &&
+      JSON.stringify(continuedTrail.geometry.coordinates).includes('[-1.9,43.1]') &&
+      JSON.stringify(continuedTrail.geometry.coordinates).includes('[-1.8,43.2]'),
+    'estela: los informes en vivo continúan la trayectoria histórica',
+  )
+  check(controller.trailAltitudes('test1').length === 4, 'estela: altitudes históricas y en vivo combinadas')
   controller.destroy()
 }
 
@@ -411,6 +447,21 @@ console.log('· Clasificación de elementos del mapa base…')
   check(!oneway.placeIcon && !oneway.name, 'mapa: flecha de sentido no es un pin de lugar')
   const border = classifyBasemapLayer({ id: 'boundary_2', type: 'line', 'source-layer': 'boundary' })
   check(border.border, 'mapa: frontera clasificada')
+}
+
+console.log('· Ajustes, segundo plano y brújula…')
+{
+  check(normalizeInterfaceScale(0.5) === 0.9, 'escala: ×0.5 guardado migra a ×0.9')
+  check(normalizeInterfaceScale(1) === 1, 'escala: ×1 se conserva')
+  check(normalizeInterfaceScale(2) === 1.25, 'escala: ×2 guardado migra a ×1.25')
+  check(normalizeInterfaceScale('sin escala') === 1, 'escala: valor inválido vuelve a ×1')
+  const gui = normalizeGuiVisibility({ clock: false, compass: false, bottomControls: 'no' })
+  check(gui.clock === false && gui.compass === false && gui.bottomControls === true, 'GUI: fusionar ajustes antiguos y nuevos')
+  check(shouldCollectInBackground(true, true), 'segundo plano: pestaña oculta y opción activa')
+  check(!shouldCollectInBackground(true, false), 'segundo plano: opción desactivada para equipos modestos')
+  check(!shouldCollectInBackground(false, true), 'segundo plano: no duplicar el bucle visible')
+  check(northResetDelta(350) === 10 && northResetDelta(-350) === -10, 'brújula: giro corto al norte')
+  check(northResetDelta(45) === -45 && northResetDelta(0) === 0, 'brújula: restablecer rumbo')
 }
 
 if (failures > 0) {

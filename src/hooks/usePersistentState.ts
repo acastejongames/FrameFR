@@ -13,10 +13,12 @@ export function usePersistentState<T>(
   key: string,
   initial: T | (() => T),
   validate?: (value: unknown) => value is T,
+  normalize?: (value: unknown) => T,
 ): [T, (value: T | ((current: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
     const stored = readStored<unknown>(key, null)
     if (stored === null) return typeof initial === 'function' ? (initial as () => T)() : initial
+    if (normalize) return normalize(stored)
     if (validate && !validate(stored)) {
       return typeof initial === 'function' ? (initial as () => T)() : initial
     }

@@ -4,7 +4,10 @@ import {
   DEFAULT_GUI_VISIBILITY,
   DEFAULT_MAX_AIRCRAFT,
   DEFAULT_SORT_KEY,
+  normalizeGuiVisibility,
+  normalizeInterfaceScale,
   type GuiVisibility,
+  type InterfaceScale,
   type SortKey,
 } from '@/config'
 import { fetchFlightTrail } from '@/data/flightTrail'
@@ -22,6 +25,7 @@ import { AirportHubs } from '@/components/AirportHubs'
 import { HubsManager } from '@/components/HubsManager'
 import { FlightTable } from '@/components/FlightTable'
 import { MapCanvas, type MapCanvasHandle } from '@/components/MapCanvas'
+import { MapCompass } from '@/components/MapCompass'
 import { MapControls } from '@/components/MapControls'
 import { SettingsModal } from '@/components/SettingsModal'
 import { StatusLegend } from '@/components/StatusLegend'
@@ -56,12 +60,26 @@ export default function App() {
       typeof (value as BasemapLayerVisibility).names === 'boolean' &&
       typeof (value as BasemapLayerVisibility).borders === 'boolean',
   )
-  const [gui, setGui] = usePersistentState<GuiVisibility>('gui', DEFAULT_GUI_VISIBILITY)
+  const [gui, setGui] = usePersistentState<GuiVisibility>(
+    'gui',
+    DEFAULT_GUI_VISIBILITY,
+    undefined,
+    normalizeGuiVisibility,
+  )
+  const [backgroundUpdates, setBackgroundUpdates] = usePersistentState<boolean>(
+    'background-updates',
+    true,
+    (value): value is boolean => typeof value === 'boolean',
+  )
   const [sortBy, setSortBy] = usePersistentState<SortKey>('sort', DEFAULT_SORT_KEY)
   const [hubItems, setHubItems] = usePersistentState<HubItem[]>('hubs', loadHubItems)
 
-  const [uiScale, setUiScale] = usePersistentState<number>('ui-scale', 1,
-    (value): value is number => value === 0.5 || value === 1 || value === 2)
+  const [uiScale, setUiScale] = usePersistentState<InterfaceScale>(
+    'ui-scale',
+    1,
+    undefined,
+    normalizeInterfaceScale,
+  )
 
   /* --------------------------------------------------------- local state */
   const [fleetSize] = useState(Number(import.meta.env.VITE_FLEET_SIZE ?? 600) || 600)
@@ -208,18 +226,16 @@ export default function App() {
         speed: 1.6,
         essential: true,
       })
-      showToast(`Volando a ${aircraft.callsign}`)
     },
-    [handle, showToast],
+    [handle],
   )
 
   const handleFlyTo = useCallback(
-    (lat: number, lon: number, zoom: number, label: string) => {
+    (lat: number, lon: number, zoom: number, _label: string) => {
       setFollow(false)
       handle?.map.flyTo({ center: [lon, lat], zoom, speed: 1.4, essential: true })
-      showToast(`Volando a ${label}`)
     },
-    [handle, showToast],
+    [handle],
   )
 
   const handleRefresh = useCallback(() => {
@@ -281,6 +297,7 @@ export default function App() {
         follow={follow}
         maxAircraft={maxAircraft}
         pollIntervalMs={pollIntervalMs}
+        backgroundUpdates={backgroundUpdates}
         labels={showLabels}
         trail
         basemap={basemap}
@@ -406,6 +423,8 @@ export default function App() {
         />
       </footer>
 
+      {handle && gui.compass && <MapCompass map={handle.map} />}
+
 
 
       <SettingsModal
@@ -417,6 +436,8 @@ export default function App() {
         onProviderChange={handleProviderChange}
         pollIntervalMs={pollIntervalMs}
         onPollIntervalChange={setPollIntervalMs}
+        backgroundUpdates={backgroundUpdates}
+        onBackgroundUpdatesChange={setBackgroundUpdates}
         maxAircraft={maxAircraft}
         onMaxAircraftChange={setMaxAircraft}
         basemap={basemap}
@@ -427,12 +448,6 @@ export default function App() {
         onShowLabelsChange={setShowLabels}
         sortBy={sortBy}
         onSortChange={setSortBy}
-        cleanMode={cleanMode}
-        onCleanModeToggle={() => setCleanMode((value) => !value)}
-        onOpenHubs={() => {
-          setSettingsOpen(false)
-          setHubsManagerOpen(true)
-        }}
       />
 
       {hubsManagerOpen && (

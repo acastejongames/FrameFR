@@ -747,3 +747,88 @@ body.ui-clean-mode .ui-overlay { visibility: hidden !important; pointer-events: 
 .map-layer-toggle small { font-size: 10px; color: #8d99aa; line-height: 1.35; }
 .map-layer-toggle .toggle-state { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .map-layer-note { margin: 10px 2px 0; font-size: 10px; line-height: 1.45; color: #7f8b9c; }
+
+/* Small reset-north compass, kept at dock height but independent from it. */
+.map-compass {
+  position: absolute;
+  right: 16px;
+  bottom: calc(54px + env(safe-area-inset-bottom, 0px));
+  z-index: 36;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid #ffffff1c;
+  background: #151b23f5;
+  box-shadow: 0 10px 32px #0007, 0 1px 0 #ffffff09 inset;
+  color: #dbe4f0;
+  pointer-events: auto;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.map-compass:hover {
+  border-color: #ffbe0066;
+  color: #fff;
+  background: #1a212bf7;
+}
+.map-compass:focus-visible {
+  outline: 2px solid #ffbe00;
+  outline-offset: 2px;
+}
+.map-compass-dial {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: block;
+  border-radius: 50%;
+  border: 1px solid #ffffff16;
+  background:
+    radial-gradient(circle at 50% 50%, #ffffff10 0 2px, transparent 2.5px),
+    conic-gradient(from 0deg, #ffffff20 0deg 1deg, transparent 1deg 89deg, #ffffff14 89deg 91deg, transparent 91deg 179deg, #ffffff14 179deg 181deg, transparent 181deg 269deg, #ffffff14 269deg 271deg, transparent 271deg);
+  will-change: transform;
+}
+.map-compass-needle {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid #ffbe00;
+  filter: drop-shadow(0 1px 1px #0009);
+}
+.map-compass-needle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 9px;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 7px solid #8d99aa;
+}
+.map-compass-north,
+.map-compass-south {
+  position: absolute;
+  left: 50%;
+  z-index: 1;
+  transform: translateX(-50%);
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: .02em;
+}
+.map-compass-north { top: 2px; color: #ffd158; }
+.map-compass-south { bottom: 2px; color: #8d99aa; font-size: 7px; }
+@container (max-width: 700px) {
+  /* Above the full-width mobile dock, below the side panels' z-order. */
+  .map-compass {
+    right: 12px;
+    bottom: calc(124px + env(safe-area-inset-bottom, 0px));
+    z-index: 24;
+  }
+}

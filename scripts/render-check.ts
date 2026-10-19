@@ -115,6 +115,9 @@ window.addEventListener('error', (event) => {
 const { createRoot } = await import('react-dom/client')
 const { createElement } = await import('react')
 const { default: App } = await import('../src/App')
+const { Map: StubMap } = (await import('maplibre-gl')) as unknown as {
+  Map: { instances: Array<Record<string, any>> }
+}
 
 const container = window.document.getElementById('root')
 if (!container) throw new Error('No se encontró #root')
@@ -155,6 +158,38 @@ expect(Boolean(counterText) && Number(counterText?.[1]) > 0, 'el contador de aer
 
 console.log('· Herramientas: desplegables, teclado, exclusión mutua y modo limpio…')
 const flush = () => new Promise(resolve => setTimeout(resolve, 40))
+
+console.log('· Navegación 3D con botón central y brújula…')
+const stubMap = StubMap.instances.at(-1)!
+expect(stubMap.options.dragRotate === false, 'el arrastre con botón derecho debe estar desactivado')
+const stubCanvas = stubMap.getCanvas()
+const pointerEvent = (type: string, values: Record<string, unknown>) => ({
+  type,
+  pointerId: 7,
+  button: 0,
+  buttons: 0,
+  clientX: 0,
+  clientY: 0,
+  preventDefault: () => undefined,
+  stopPropagation: () => undefined,
+  ...values,
+})
+stubCanvas.dispatchEvent(pointerEvent('pointerdown', { button: 2, buttons: 2, clientX: 100, clientY: 100 }))
+stubCanvas.dispatchEvent(pointerEvent('pointermove', { button: 2, buttons: 2, clientX: 180, clientY: 60 }))
+expect(stubMap.getBearing() === 0 && stubMap.getPitch() === 0, 'el botón derecho no rota ni inclina el mapa')
+stubCanvas.dispatchEvent(pointerEvent('pointerdown', { button: 1, buttons: 4, clientX: 100, clientY: 100 }))
+stubCanvas.dispatchEvent(pointerEvent('pointermove', { button: 1, buttons: 4, clientX: 200, clientY: 60 }))
+stubCanvas.dispatchEvent(pointerEvent('pointerup', { button: 1, buttons: 0, clientX: 200, clientY: 60 }))
+expect(Math.abs(stubMap.getBearing() - 35) < 0.001, 'botón central + movimiento horizontal rota el mapa')
+expect(Math.abs(stubMap.getPitch() - 10) < 0.001, 'botón central + movimiento vertical inclina el mapa')
+await flush()
+const compassDial = () => container.querySelector<HTMLElement>('.map-compass-dial')
+expect(compassDial()?.style.transform === 'rotate(-35deg)', 'la brújula contrarota con el mapa')
+container.querySelector<HTMLButtonElement>('.map-compass')!.click()
+await flush()
+expect(Math.abs(stubMap.getBearing()) < 0.001, 'pulsar la brújula restablece el norte')
+expect(compassDial()?.style.transform === 'rotate(0deg)', 'la brújula vuelve al norte')
+
 const weatherTrigger = container.querySelector<HTMLButtonElement>('[aria-controls="weather-tools"]')!
 const mapTrigger = container.querySelector<HTMLButtonElement>('[aria-controls="map-tools"]')!
 const weatherPanel = container.querySelector<HTMLElement>('#weather-tools')!
@@ -200,15 +235,58 @@ window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape
 await flush()
 expect(!text.includes('Zoom de seguimiento'), 'la ficha no debe incluir zoom de seguimiento')
 expect(Boolean(container.querySelector('header .airport-strip')), 'aeropuertos integrados en cabecera')
+expect(Boolean(container.querySelector('.map-compass')), 'brújula visible junto al mapa')
+container.querySelector<HTMLButtonElement>('.map-compass')!.click()
+await flush()
 container.querySelector<HTMLButtonElement>('[aria-label="Ajustes"]')!.click()
 await flush()
+const settingsDialog = container.querySelector<HTMLElement>('[role="dialog"]')!
+const settingsTabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+expect(settingsTabs.map((tab) => tab.textContent?.trim()).join('|') === 'General|Interfaz|Telemetría', 'ajustes divididos en tres pestañas')
+expect(settingsTabs[0].getAttribute('aria-selected') === 'true', 'General es la pestaña inicial')
+expect(!settingsDialog.textContent?.includes('Modo limpio'), 'Modo limpio no debe duplicarse en Ajustes')
+expect(!settingsDialog.textContent?.includes('Configurar aeropuertos y carpetas'), 'aeropuertos no debe duplicarse en Ajustes')
+const backgroundToggle = container.querySelector<HTMLInputElement>('#background-updates')!
+expect(backgroundToggle.checked, 'actualizaciones en segundo plano activadas por defecto')
+backgroundToggle.click()
+await flush()
+expect(window.localStorage.getItem('aeroscope:background-updates') === 'false', 'segundo plano desactivado persistido')
+backgroundToggle.click()
+await flush()
+expect(window.localStorage.getItem('aeroscope:background-updates') === 'true', 'segundo plano reactivado persistido')
+settingsTabs[1].click()
+await flush()
+expect(settingsTabs[1].getAttribute('aria-selected') === 'true', 'pestaña Interfaz seleccionable')
 const scale = container.querySelector<HTMLSelectElement>('#ui-scale')!
-expect(Boolean(scale), 'selector de escala presente')
-scale.value = '2'
+expect(Boolean(scale), 'selector de escala presente en Interfaz')
+expect([...scale.options].map((option) => option.value).join('|') === '0.9|1|1.25', 'escalas ×0.9, ×1 y ×1.25')
+scale.value = '1.25'
 scale.dispatchEvent(new window.Event('change', { bubbles: true }))
 await flush()
-expect(container.querySelector<HTMLElement>('.ui-overlay')?.style.transform === 'scale(2)', 'escala aplicada solo a UI')
-expect(window.localStorage.getItem('aeroscope:ui-scale') === '2', 'escala persistida')
+expect(container.querySelector<HTMLElement>('.ui-overlay')?.style.transform === 'scale(1.25)', 'escala aplicada solo a UI')
+expect(window.localStorage.getItem('aeroscope:ui-scale') === '1.25', 'escala persistida')
+const compassToggle = [...container.querySelectorAll<HTMLLabelElement>('label')]
+  .find((label) => label.textContent?.trim() === 'Brújula')
+  ?.querySelector<HTMLInputElement>('input')!
+expect(Boolean(compassToggle), 'interruptor de brújula en Interfaz')
+compassToggle.click()
+await flush()
+expect(!container.querySelector('.map-compass'), 'la brújula se puede ocultar desde Ajustes')
+compassToggle.click()
+await flush()
+expect(Boolean(container.querySelector('.map-compass')), 'la brújula se puede volver a mostrar')
+settingsTabs[2].click()
+await flush()
+expect(Boolean(container.querySelector('#telemetry-provider')), 'proveedor ADS-B en Telemetría')
+expect(Boolean(container.querySelector('#telemetry-poll-interval')), 'frecuencia en Telemetría')
+container.querySelector<HTMLButtonElement>('[aria-label="Cerrar ajustes"]')!.click()
+await flush()
+const madButton = [...container.querySelectorAll<HTMLButtonElement>('header button')]
+  .find((button) => button.textContent?.trim().startsWith('MAD'))
+expect(Boolean(madButton), 'acceso MAD disponible para comprobar el vuelo de cámara')
+madButton!.click()
+await flush()
+expect(!container.textContent?.includes('Volando a'), 'sin aviso «Volando a» al mover la cámara')
 
 /* The critical runtime errors that must not appear. */
 const fatalPatterns = [

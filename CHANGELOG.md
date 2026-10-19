@@ -1,3 +1,21 @@
+## Ajustes por secciones, segundo plano y brújula — 2026-10-19
+
+- Tamaños de interfaz ×0.9 / ×1 / ×1.25; las preferencias antiguas ×0.5 y ×2
+  migran automáticamente al extremo equivalente.
+- Ajustes dividido en **General**, **Interfaz** y **Telemetría**. Se retiran
+  de Ajustes el modo limpio y la configuración de aeropuertos/carpetas porque
+  ya están en las barras inferior y superior.
+- Nueva opción persistente **Actualizaciones en segundo plano** en General:
+  un worker sigue sondeando e incorporando informes reales mientras la
+  pestaña permanece abierta pero oculta; puede desactivarse en equipos poco
+  potentes. Las estelas separan huecos largos en lugar de unirlos con una
+  recta no observada.
+- Créditos fotográficos sin emoji y sin avisos «Volando a…» al mover la cámara.
+- La navegación 3D manual usa el botón central/rueda mantenido y el
+  movimiento del ratón; se desactiva la rotación con botón derecho.
+- Brújula pequeña y ocultable desde Interfaz; al pulsarla restablece el norte
+  por el giro más corto sin cambiar centro, zoom ni inclinación.
+
 ## Seguimiento sin zoom forzado, meteorología estable y capas del mapa — 2026-10-19
 
 - Eliminado por completo el zoom de seguimiento; seguir o centrar conserva

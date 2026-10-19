@@ -1,4 +1,4 @@
-import type { Feature, FeatureCollection, LineString, Point } from 'geojson'
+import type { Feature, FeatureCollection, LineString, MultiLineString, Point } from 'geojson'
 import type { Map } from 'maplibre-gl'
 import { buildAircraftIcons } from './aircraftIcons'
 import { SELECTED_COLOR, TRAIL_COLOR } from './palette'
@@ -24,7 +24,7 @@ export interface AircraftFeatureProps {
 }
 
 export type AircraftFeature = Feature<Point, AircraftFeatureProps>
-export type TrailFeature = Feature<LineString>
+export type TrailFeature = Feature<LineString | MultiLineString>
 
 export const EMPTY_FC: FeatureCollection = { type: 'FeatureCollection', features: [] }
 

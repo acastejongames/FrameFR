@@ -104,7 +104,7 @@ function parseFr24Detail(payload: unknown, hex: string): TrailResult | null {
     const photo: AircraftPhoto = {
       src: image.src,
       link: image.link ?? image.src,
-      credit: `📷 ${image.copyright ?? 'Spotter'} · JetPhotos`,
+      credit: `${image.copyright ?? 'Spotter'} · JetPhotos`,
       source: 'JetPhotos',
     }
     result.photo = photo

@@ -62,7 +62,7 @@ async function fromPlanespotters(
   return {
     src,
     link: first?.link ?? 'https://www.planespotters.net',
-    credit: `📷 ${first?.photographer ?? 'Spotter'}${registration ? ` (${registration})` : ` (${hex})`}`,
+    credit: `${first?.photographer ?? 'Spotter'}${registration ? ` (${registration})` : ` (${hex})`}`,
     source: 'Planespotters',
   }
 }
@@ -85,7 +85,7 @@ async function fromCommons(query: string, model: string | undefined): Promise<Ai
   return {
     src,
     link: info?.descriptionurl ?? src,
-    credit: `📷 ${info?.user ?? 'Aviation Commons'}${model ? ` · ${model}` : ''}`,
+    credit: `${info?.user ?? 'Aviation Commons'}${model ? ` · ${model}` : ''}`,
     source: 'Commons',
   }
 }

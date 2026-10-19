@@ -27,6 +27,7 @@ interface MapCanvasProps {
   follow: boolean
   maxAircraft: number
   pollIntervalMs: number
+  backgroundUpdates: boolean
   labels: boolean
   trail: boolean
   basemap: BasemapId
@@ -57,6 +58,7 @@ export function MapCanvas({
   follow,
   maxAircraft,
   pollIntervalMs,
+  backgroundUpdates,
   labels,
   trail,
   basemap,
@@ -85,6 +87,7 @@ export function MapCanvas({
     is3D,
     maxAircraft,
     pollIntervalMs,
+    backgroundUpdates,
     onReady,
     onSelect,
     onFollowChange,
@@ -103,12 +106,13 @@ export function MapCanvas({
       basemap,
       basemapLayers,
       is3D,
-        maxAircraft,
+      maxAircraft,
       pollIntervalMs,
+      backgroundUpdates,
       onReady,
       onSelect,
       onFollowChange,
-        onError,
+      onError,
     }
   })
 
@@ -128,6 +132,9 @@ export function MapCanvas({
       minZoom: 1.5,
       maxZoom: 16,
       maxPitch: 70,
+      // Built-in right-drag rotation is replaced below by an explicit
+      // middle-button gesture, as requested for 3D navigation.
+      dragRotate: false,
       attributionControl: false,
       fadeDuration: 120,
       refreshExpiredTiles: false,
@@ -152,10 +159,12 @@ export function MapCanvas({
         providerId: latest.current.providerId,
         fleetSize: latest.current.fleetSize,
         filters: latest.current.filters,
+        backgroundUpdates: latest.current.backgroundUpdates,
         onFollowChange: (value) => latest.current.onFollowChange(value),
       })
       controller.setMaxAircraft(latest.current.maxAircraft)
       controller.setPollInterval(latest.current.pollIntervalMs)
+      controller.setBackgroundUpdates(latest.current.backgroundUpdates)
       controller.start()
       controllerRef.current = controller
       setReady(true)
@@ -214,6 +223,62 @@ export function MapCanvas({
       })
     }
 
+    // Manual 3D navigation: hold the mouse wheel/middle button and move.
+    // Horizontal movement changes bearing; moving up increases pitch and
+    // moving down returns towards a top-down view. The centre and zoom are
+    // intentionally untouched. MapLibre's right-button handler stays off.
+    const canvas = map.getCanvas()
+    let middleDrag: { pointerId: number; x: number; y: number } | null = null
+
+    const stopMiddleDrag = (event?: PointerEvent): void => {
+      if (!middleDrag || (event && event.pointerId !== middleDrag.pointerId)) return
+      const { pointerId } = middleDrag
+      middleDrag = null
+      map.dragPan.enable()
+      if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId)
+      canvas.style.cursor = ''
+    }
+
+    const handleMiddlePointerDown = (event: PointerEvent): void => {
+      if (event.button !== 1) return
+      event.preventDefault()
+      event.stopPropagation()
+      middleDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+      canvas.setPointerCapture(event.pointerId)
+      map.dragPan.disable()
+      canvas.style.cursor = 'grabbing'
+    }
+
+    const handleMiddlePointerMove = (event: PointerEvent): void => {
+      if (!middleDrag || event.pointerId !== middleDrag.pointerId) return
+      if ((event.buttons & 4) === 0) {
+        stopMiddleDrag(event)
+        return
+      }
+      const dx = event.clientX - middleDrag.x
+      const dy = event.clientY - middleDrag.y
+      middleDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+      if (dx === 0 && dy === 0) return
+      event.preventDefault()
+      map.jumpTo({
+        bearing: map.getBearing() + dx * 0.35,
+        pitch: Math.min(map.getMaxPitch(), Math.max(0, map.getPitch() - dy * 0.25)),
+      })
+    }
+
+    const preventMiddleButtonDefault = (event: MouseEvent): void => {
+      if (event.button === 1) event.preventDefault()
+    }
+    const preventContextMenu = (event: Event): void => event.preventDefault()
+
+    canvas.addEventListener('pointerdown', handleMiddlePointerDown)
+    canvas.addEventListener('pointermove', handleMiddlePointerMove)
+    canvas.addEventListener('pointerup', stopMiddleDrag)
+    canvas.addEventListener('pointercancel', stopMiddleDrag)
+    canvas.addEventListener('mousedown', preventMiddleButtonDefault)
+    canvas.addEventListener('auxclick', preventMiddleButtonDefault)
+    canvas.addEventListener('contextmenu', preventContextMenu)
+
     map.on('style.load', handleStyleLoad)
     map.on('load', handleLoad)
     map.on('error', handleError)
@@ -224,6 +289,14 @@ export function MapCanvas({
     map.on('mouseleave', AIRCRAFT_LAYER, handleLeave)
 
     return () => {
+      stopMiddleDrag()
+      canvas.removeEventListener('pointerdown', handleMiddlePointerDown)
+      canvas.removeEventListener('pointermove', handleMiddlePointerMove)
+      canvas.removeEventListener('pointerup', stopMiddleDrag)
+      canvas.removeEventListener('pointercancel', stopMiddleDrag)
+      canvas.removeEventListener('mousedown', preventMiddleButtonDefault)
+      canvas.removeEventListener('auxclick', preventMiddleButtonDefault)
+      canvas.removeEventListener('contextmenu', preventContextMenu)
       controllerRef.current?.destroy()
       controllerRef.current = null
       map.remove()
@@ -249,6 +322,10 @@ export function MapCanvas({
   useEffect(() => {
     controllerRef.current?.setPollInterval(pollIntervalMs)
   }, [pollIntervalMs, ready])
+
+  useEffect(() => {
+    controllerRef.current?.setBackgroundUpdates(backgroundUpdates)
+  }, [backgroundUpdates, ready])
 
   useEffect(() => {
     controllerRef.current?.setFilters(filters)
