@@ -4,6 +4,7 @@ node_modules/
 # Build output
 dist/
 dist-smoke/
+dist-render/
 
 # Local env
 .env
@@ -14,6 +15,7 @@ dist-smoke/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # Editors / OS
 .DS_Store

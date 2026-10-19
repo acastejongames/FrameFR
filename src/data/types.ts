@@ -7,6 +7,8 @@
  * provider module and registering it in `src/data/registry.ts`.
  */
 
+import type { SilhouetteId } from './aircraftTypes'
+
 /** High level aircraft grouping. */
 export type AircraftCategory = 'commercial' | 'cargo' | 'general' | 'military'
 
@@ -23,6 +25,19 @@ export interface Airport {
   lon: number
   /** Relative traffic weight used when generating demo routes. */
   weight?: number
+}
+
+/**
+ * Route information.
+ *
+ * Simulated providers fill the full `Airport` objects; live feeds usually only
+ * know the IATA codes and the city names, so both shapes are supported.
+ */
+export interface FlightRoute {
+  origin?: string
+  originCity?: string
+  destination?: string
+  destinationCity?: string
 }
 
 /** A single aircraft observation. */
@@ -54,6 +69,28 @@ export interface Aircraft {
   observedAt: number
   /** Progress along the route, 0..1. Only filled by simulated providers. */
   progress?: number
+
+  /* ------------------------------------------- live feed extras (AeroScope) */
+  /** Commercial flight number with the IATA prefix (e.g. `LH419`). */
+  flightNumber?: string
+  /** Marketing airline name resolved from the callsign prefix. */
+  airlineName?: string
+  /** Full aircraft model, e.g. `Airbus A340-600`. */
+  fullModel?: string
+  /** Route as reported by the feed (IATA codes + city names). */
+  route?: FlightRoute
+  /** Silhouette family used to draw the icon on the map. */
+  silhouette?: SilhouetteId
+  /** Receiver signal strength in dB, when the feed reports it. */
+  rssi?: number
+  /** Seconds since the last position report, when the feed reports it. */
+  seen?: number
+  /** Emergency squawk/flag reported by the feed. */
+  emergency?: string
+  /** Identifier of the feed that produced this observation. */
+  sourceId?: string
+  /** Internal id of the zone in the Flightradar24 feed (needed for the trail). */
+  zoneId?: string
 }
 
 /** Geographic area the map is currently showing. */
@@ -95,6 +132,11 @@ export interface AircraftProvider {
   readonly attribution?: string
   /** Optional hint surfaced in the UI (e.g. "radius capped to 250 NM"). */
   readonly notice?: string
+  /**
+   * Name of the network that answered the last poll, when the provider talks
+   * to more than one feed (the "auto" mode).
+   */
+  readonly activeSource?: string
 
   /**
    * Optional: advance an internal simulation clock.

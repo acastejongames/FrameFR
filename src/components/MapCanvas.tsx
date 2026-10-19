@@ -24,13 +24,18 @@ interface MapCanvasProps {
   filters: FleetFilters
   selectedId: string | null
   follow: boolean
+  followZoom: number
+  maxAircraft: number
+  pollIntervalMs: number
   labels: boolean
   trail: boolean
   basemap: BasemapId
   basemapNames: boolean
+  is3D: boolean
   onReady: (handle: MapCanvasHandle | null) => void
   onSelect: (id: string | null) => void
   onFollowChange: (follow: boolean) => void
+  onZoomChange: (zoom: number) => void
   onError: (message: string | null) => void
 }
 
@@ -51,13 +56,18 @@ export function MapCanvas({
   filters,
   selectedId,
   follow,
+  followZoom,
+  maxAircraft,
+  pollIntervalMs,
   labels,
   trail,
   basemap,
   basemapNames,
+  is3D,
   onReady,
   onSelect,
   onFollowChange,
+  onZoomChange,
   onError,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -75,9 +85,14 @@ export function MapCanvas({
     trail,
     basemap,
     basemapNames,
+    is3D,
+    followZoom,
+    maxAircraft,
+    pollIntervalMs,
     onReady,
     onSelect,
     onFollowChange,
+    onZoomChange,
     onError,
   })
   const [ready, setReady] = useState(false)
@@ -92,9 +107,14 @@ export function MapCanvas({
       trail,
       basemap,
       basemapNames,
+      is3D,
+      followZoom,
+      maxAircraft,
+      pollIntervalMs,
       onReady,
       onSelect,
       onFollowChange,
+      onZoomChange,
       onError,
     }
   })
@@ -110,11 +130,11 @@ export function MapCanvas({
       style: initialBasemap.url,
       center: DEFAULT_VIEW.center,
       zoom: DEFAULT_VIEW.zoom,
-      pitch: initialBasemap.pitch,
-      bearing: initialBasemap.bearing,
+      pitch: latest.current.is3D ? 54 : initialBasemap.pitch,
+      bearing: 0,
       minZoom: 1.5,
-      maxZoom: 14,
-      maxPitch: initialBasemap.pitch,
+      maxZoom: 16,
+      maxPitch: 70,
       attributionControl: false,
       fadeDuration: 120,
       refreshExpiredTiles: false,
@@ -139,6 +159,9 @@ export function MapCanvas({
         filters: latest.current.filters,
         onFollowChange: (value) => latest.current.onFollowChange(value),
       })
+      controller.setFollowZoom(latest.current.followZoom)
+      controller.setMaxAircraft(latest.current.maxAircraft)
+      controller.setPollInterval(latest.current.pollIntervalMs)
       controller.start()
       controllerRef.current = controller
       setReady(true)
@@ -196,6 +219,11 @@ export function MapCanvas({
       })
     }
 
+    // Keep the "seguimiento" slider in sync with the real zoom level.
+    const handleZoom = () => {
+      latest.current.onZoomChange(map.getZoom())
+    }
+
     map.on('style.load', handleStyleLoad)
     map.on('load', handleLoad)
     map.on('error', handleError)
@@ -204,6 +232,7 @@ export function MapCanvas({
     map.on('mouseenter', AIRCRAFT_LAYER, handleEnter)
     map.on('mousemove', AIRCRAFT_LAYER, handleMove)
     map.on('mouseleave', AIRCRAFT_LAYER, handleLeave)
+    map.on('zoom', handleZoom)
 
     return () => {
       controllerRef.current?.destroy()
@@ -223,6 +252,18 @@ export function MapCanvas({
   useEffect(() => {
     controllerRef.current?.setFollow(follow)
   }, [follow, ready])
+
+  useEffect(() => {
+    controllerRef.current?.setFollowZoom(followZoom)
+  }, [followZoom, ready])
+
+  useEffect(() => {
+    controllerRef.current?.setMaxAircraft(maxAircraft)
+  }, [maxAircraft, ready])
+
+  useEffect(() => {
+    controllerRef.current?.setPollInterval(pollIntervalMs)
+  }, [pollIntervalMs, ready])
 
   useEffect(() => {
     controllerRef.current?.setFilters(filters)
@@ -263,6 +304,15 @@ export function MapCanvas({
     map.easeTo({ pitch: option.pitch, bearing: option.bearing, duration: 600 })
   }, [basemap])
 
+  /* 3D tilt is independent of the basemap. */
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    const target = is3D ? 54 : 0
+    if (Math.abs(map.getPitch() - target) < 0.5) return
+    map.easeTo({ pitch: target, duration: 700 })
+  }, [is3D, ready])
+
   /* Keep the tooltip glued to the cursor between renders. */
   useEffect(() => {
     const element = tooltipRef.current
@@ -280,7 +330,7 @@ export function MapCanvas({
           className="pointer-events-none absolute left-0 top-0 z-20 rounded-lg border border-white/10 bg-[#0b0d12]/92 px-2.5 py-1.5 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.9)] backdrop-blur-md"
         >
           <div className="text-[11.5px] font-medium tracking-wide">{hover.callsign}</div>
-          <div className="mt-0.5 text-[10px] tabular-nums text-white/45">{hover.detail}</div>
+          <div className="tech mt-0.5 text-[10px] text-white/45">{hover.detail}</div>
         </div>
       )}
     </div>

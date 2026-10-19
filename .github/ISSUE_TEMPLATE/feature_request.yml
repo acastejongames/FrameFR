@@ -1,0 +1,41 @@
+name: Nueva funcionalidad
+description: Propón una mejora para AeroScope
+labels: ['enhancement']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: ¿Qué problema resuelve?
+      description: Describe el caso de uso real, no sólo la solución.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Propuesta
+      description: Cómo lo Imagine, con capturas o mockups si los hay.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - Datos / proveedores
+        - Interfaz
+        - Mapa y render
+        - Rendimiento
+        - Despliegue / CI
+        - Documentación
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Comprobaciones
+      options:
+        - label: He buscado que la funcionalidad ya exista en las incidencias.
+          required: true

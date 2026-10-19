@@ -2,22 +2,42 @@
 <html lang="es" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#07080a" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0d1014" />
+    <meta name="color-scheme" content="dark" />
     <meta
       name="description"
-      content="FrameFR — seguimiento de tráfico aéreo en tiempo real sobre un mapa interactivo."
+      content="AeroScope — radar ADS-B en tiempo real: tráfico aéreo global sobre un mapa interactivo, con búsqueda planetaria, fotos de aeronaves y seguimiento de vuelos."
     />
+    <meta name="author" content="FrameFR" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="AeroScope · Radar ADS-B en tiempo real" />
+    <meta
+      property="og:description"
+      content="Tráfico aéreo global en directo: búsqueda planetaria, siluetas por tipo de aeronave, fotos y seguimiento de vuelos."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+
     <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0d11'/%3E%3Cpath d='M16 5l2.2 6.6 6.8 3.4-6.8 3.4-2.2 6.6-2.2-6.6L7 15l6.8-3.4z' fill='%235eead4'/%3E%3C/svg%3E" />
-    <title>FrameFR · Tráfico aéreo en tiempo real</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Roboto+Condensed:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect x='2' y='2' width='32' height='32' rx='6' fill='%231b222c' stroke='%23ffbe00' stroke-width='1.5'/%3E%3Ccircle cx='18' cy='18' r='10' stroke='%234b5563' stroke-width='1.2' stroke-dasharray='2 2'/%3E%3Cpath d='M18 8L21 16L29 18L21 20L18 28L15 20L7 18L15 16L18 8Z' fill='%23ffbe00' fill-opacity='.2' stroke='%23ffbe00' stroke-width='1.3'/%3E%3Ccircle cx='18' cy='18' r='2.2' fill='%23ffbe00'/%3E%3C/svg%3E"
+    />
+    <title>AeroScope · Radar ADS-B en tiempo real</title>
     <style>
       html,
       body,
       #root {
         height: 100%;
         margin: 0;
-        background: #07080a;
+        background: #0d1014;
       }
       #boot {
         position: fixed;
@@ -25,14 +45,15 @@
         display: grid;
         place-items: center;
         color: #6b7280;
-        font: 500 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font: 500 13px/1.4 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+          sans-serif;
         letter-spacing: 0.14em;
         text-transform: uppercase;
       }
     </style>
   </head>
   <body>
-    <div id="root"><div id="boot">Cargando FrameFR…</div></div>
+    <div id="root"><div id="boot">Cargando AeroScope…</div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

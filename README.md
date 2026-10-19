@@ -1,36 +1,45 @@
-# FrameFR
+<div align="center">
 
-Seguimiento de tráfico aéreo en tiempo real sobre un mapa interactivo, inspirado en Flightradar24.
+# ✈️ AeroScope
 
-> **Demo desplegada:** https://acastejongames.github.io/FrameFR/
+**Radar ADS-B en tiempo real sobre un mapa interactivo**
+
+[![CI](https://github.com/acastejongames/FrameFR/actions/workflows/ci.yml/badge.svg)](https://github.com/acastejongames/FrameFR/actions/workflows/ci.yml)
+[![Deploy](https://github.com/acastejongames/FrameFR/actions/workflows/deploy.yml/badge.svg)](https://github.com/acastejongames/FrameFR/actions/workflows/deploy.yml)
+[![CodeQL](https://github.com/acastejongames/FrameFR/actions/workflows/codeql.yml/badge.svg)](https://github.com/acastejongames/FrameFR/actions/workflows/codeql.yml)
+[![Licencia](https://img.shields.io/badge/licencia-MIT-ffbe00.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-22%2B-5eead4.svg)](https://nodejs.org)
+
+[▶️ Demo en vivo](https://acastejongames.github.io/FrameFR/)
+
+</div>
 
 ---
 
-## Vista general
+## Qué es
 
-FrameFR muestra aeronaves en movimiento sobre una cartografía oscura y minimalista. Cada avión se
-dibuja con su rumbo real, se colorea según su altitud y se puede seleccionar para ver su ficha
-completa (ruta, altitud, velocidad, régimen de ascenso, squawk, matrícula…).
+AeroScope dibuja el tráfico aéreo **real** sobre la cartografía de
+[OpenFreeMap](https://openfreemap.org): cada aeronave aparece con su rumbo
+verdadero, con la silueta que le corresponde según su tipo ICAO y con su
+etiqueta de vuelo. Puedes seleccionarla para ver su ficha completa, seguirla
+con la cámara, buscar **cualquier vuelo del planeta** y saltar a cualquier
+aeropuerto.
 
-Arranca con **datos de demostración** —una flota simulada que vuela rutas reales entre aeropuertos
-reales— y está preparada para consumir **fuentes ADS-B públicas** como
-[adsb.lol](https://adsb.lol) cambiando un único ajuste, sin tocar el resto del código.
+No es una simulación: cuando eliges una red ADS-B real, las posiciones que se
+mueven en el mapa son las que los receptores están leyendo del cielo.
 
-## Tecnologías
+<table>
+<tr>
+<td width="50%"><b>Búsqueda planetaria</b><br/><sub>Indicativos IATA e ICAO, modelos, aerolíneas, matrículas y direcciones hexadecimales.</sub></td>
+<td width="50%"><b>Siluetas reales</b><br/><sub>Ocho familias de aeronave dibujadas en canvas, con estado en vuelo, seleccionado y en tierra.</sub></td>
+</tr>
+<tr>
+<td><b>Ficha con fotografía</b><br/><sub>Foto de la aeronave y perfil de altitud de la trajectory.</sub></td>
+<td><b>Multired</b><br/><sub>Seis fuentes interrogadas en paralelo y fusionadas por dirección ICAO.</sub></td>
+</tr>
+</table>
 
-| Pieza           | Uso                                                        |
-| --------------- | ---------------------------------------------------------- |
-| **React 19**    | Interfaz (componentes funcionales + hooks)                  |
-| **TypeScript**  | Tipado estricto en todo el proyecto                         |
-| **Vite**        | Servidor de desarrollo y build                              |
-| **MapLibre GL** | Cartografía vectorial interactiva con [OpenFreeMap](https://openfreemap.org) (sin API key) |
-| **Tailwind CSS 4** | Estilos (tema oscuro propio, sin dependencias de UI)     |
-| **Lucide**      | Iconografía                                                 |
-| **GitHub Actions** | CI y despliegue automático en GitHub Pages               |
-
-Sin base de datos, sin autenticación y sin servicios de pago: la app es 100 % estática.
-
-## Puesta en marcha
+## 🚀 Puesta en marcha
 
 ```bash
 git clone https://github.com/acastejongames/FrameFR.git
@@ -39,50 +48,124 @@ npm install
 npm run dev          # http://localhost:5173
 ```
 
-| Script            | Descripción                                                        |
-| ----------------- | ------------------------------------------------------------------ |
-| `npm run dev`     | Servidor de desarrollo con recarga en caliente                      |
-| `npm run build`   | Comprueba los tipos, genera `dist/` y el `404.html` de fallback      |
-| `npm run preview` | Sirve `dist/` tal y como quedará en producción                      |
-| `npm run typecheck` | Sólo comprobación de tipos                                        |
-| `npm run smoke`   | Prueba headless del simulador y de la geodesia (sin navegador)       |
+| Script                | Descripción                                                |
+| --------------------- | ---------------------------------------------------------- |
+| `npm run dev`         | Servidor de desarrollo con recarga en caliente              |
+| `npm run build`       | Comprueba los tipos, genera `dist/` y el `404.html`          |
+| `npm run preview`     | Sirve `dist/` tal y como quedará en producción              |
+| `npm run typecheck`   | Sólo comprobación de tipos                                  |
+| `npm run smoke`       | Pruebas headless de la capa de datos (sin navegador)         |
+| `npm run check:render`| Monta la interfaz en `jsdom` y comprueba que se pinta        |
 
-Requiere **Node 20.19+** (probado con Node 22).
+Requiere **Node 20.19+** (probado con Node 22, ver [`.nvmrc`](.nvmrc)).
 
 ### Variables de entorno
 
 Copia `.env.example` como `.env`. Todas son opcionales:
 
-| Variable               | Por defecto                    | Para qué sirve                              |
-| ---------------------- | ------------------------------ | ------------------------------------------- |
-| `VITE_ADSB_PROVIDER`   | `demo`                         | Proveedor inicial (`demo` o `adsblol`)       |
-| `VITE_FLEET_SIZE`      | `600`                          | Tamaño de la flota simulada                  |
-| `VITE_GLYPHS_URL`      | glifos de OpenFreeMap          | Tipografía de las etiquetas del mapa         |
-| `VITE_BASE_PATH`       | `/FrameFR/` en producción      | Ruta base del build                          |
+| Variable             | Por defecto               | Para qué sirve                                          |
+| -------------------- | ------------------------- | ------------------------------------------------------- |
+| `VITE_ADSB_PROVIDER` | `auto`                    | Proveedor inicial (`auto`, `fr24`, `adsblol`, `demo`…)   |
+| `VITE_FLEET_SIZE`    | `600`                     | Tamaño de la flota simulada (sólo `demo`)                |
+| `VITE_GLYPHS_URL`    | glifos de OpenFreeMap     | Tipografía de las etiquetas del mapa                     |
+| `VITE_BASE_PATH`     | `/<repo>/` en producción  | Ruta base del build                                      |
 
-## Arquitectura
+## 📡 Fuentes de datos
+
+El proveedor `auto` interroga **en paralelo** todas las redes disponibles y
+fusiona las respuestas de-duplicando por dirección ICAO 24 bits, de modo que
+una nube en Europa no deja el resto del planeta a ciegas.
+
+| Proveedor      | Cobertura            | Aporta                              | Transporte |
+| -------------- | -------------------- | ----------------------------------- | ---------- |
+| `auto`         | Global               | Fusión de todas las de abajo        | mixto      |
+| `fr24`         | Global               | Ruta, matrícula y nº de vuelo       | JSONP      |
+| `adsblol`      | Europa / Norteamérica | Posición y telemetría               | CORS       |
+| `adsbone`      | Europa / Norteamérica | Posición y telemetría               | CORS       |
+| `adsbfi`       | Norte de Europa       | Posición y telemetría               | CORS       |
+| `airplaneslive`| Internacional          | Posición y telemetría               | CORS       |
+| `opensky`      | Global (parcial)     | Referencia de la red abierta        | CORS       |
+| `demo`         | —                    | Flota simulada, funciona sin red    | —          |
+
+El feed de Flightradar24 no envía cabeceras CORS, por eso se lee con **JSONP**
+(`src/data/providers/jsonp.ts`). El resto se consulta con `fetch`.
+
+### Enriquecimiento
+
+Los feeds públicos dan la posición pero no siempre el resto. AeroScope lo
+completa con:
+
+- **Aerolínea y número de vuelo** a partir del indicativo ICAO
+  (`DLH419` → *Lufthansa*, `LH419`).
+- **Modelo de aeronave** a partir del designador de tipo (`A346` →
+  *Airbus A340-600*).
+- **Silueta** según la familia del tipo (cuatrimotor pesado, fuselaje ancho,
+  fuselaje estrecho, jet business, turbopropulsor, avión ligero, helicóptero
+  o caza).
+- **Fotografía** del avión en [Planespotters](https://www.planespotters.net),
+  JetPhotos o [Wikimedia Commons](https://commons.wikimedia.org).
+- **Trayectoria histórica** de la izquierda, vía el handler de detalle de
+  Flightradar24 o el histórico de OpenSky.
+
+## 🗺️ Interfaz
+
+- **Barra superior:** marca, buscador global (`/` para enfocarlo), accesos a
+  aeropuertos, reloj UTC, contador de aeronaves y ajustes.
+- **Panel izquierdo:** ficha de la aeronave seleccionada — fotografía, modelo,
+  ruta, altitud, velocidad, régimen, perfil de altitud, estela, zoom de
+  seguimiento y acciones *Seguir* / *Vista 3D* / *Limpiar estela*.
+- **Panel derecho:** tabla del tráfico del sector visible, ordenable por
+  altitud, velocidad o indicativo.
+- **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
+  vista 3D, modo limpio y geolocalización.
+- **Ajustes:** proveedor de datos, frecuencia de sondeo, límite de
+  aeronaves, estilo del mapa, orden de la tabla y visibilidad de cada panel.
+- **Atajos:** `/` busca · `U` modo limpio · `Esc` cierra.
+
+Todo se guarda en el navegador: al recargar recuperas el proveedor, la
+frecuencia, los accesos de aeropuertos y el estado de la interfaz.
+
+## 🏗️ Arquitectura
 
 ```
 src/
-├─ data/                    # Capa de datos (independiente de la UI y del mapa)
-│  ├─ types.ts              #    Aircraft, AircraftProvider, Viewport…
-│  ├─ geo.ts                #    Ortodromia, rumbos, recuadros
-│  ├─ airports.ts           #    Catálogo de aeropuertos reales
-│  ├─ airlines.ts           #    Operadores, tipos y regiones
-│  ├─ registry.ts           #    Catálogo de proveedores + factoría
+├─ data/                     # Capa de datos (independiente de la UI y del mapa)
+│  ├─ types.ts               #    Aircraft, AircraftProvider, Viewport…
+│  ├─ geo.ts                 #    Ortodromia, rumbos, recuadros
+│  ├─ airports.ts            #    Catálogo de aeropuertos reales
+│  ├─ airportDirectory.ts    #    Directorio de accesos rápidos
+│  ├─ airlines.ts            #    Operadores, tipos y regiones
+│  ├─ airlineCodes.ts        #    ICAO → IATA + nombre de aerolínea
+│  ├─ aircraftTypes.ts       #    Tipos de aeronave y familias de silueta
+│  ├─ category.ts            #    Clasificación comercial / carga / GA / militar
+│  ├─ hubs.ts                #    Accesos a aeropuertos (persistencia)
+│  ├─ globalSearch.ts        #    Búsqueda planetaria
+│  ├─ photos.ts              #    Resolvedor de fotografías
+│  ├─ flightTrail.ts         #    Trayectoria histórica
+│  ├─ registry.ts            #    Catálogo de proveedores + factoría
 │  └─ providers/
-│     ├─ demoProvider.ts    #    Flota simulada (rutas reales, perfiles de vuelo)
-│     └─ adsbLolProvider.ts #    Feed público adsb.lol
+│     ├─ demoProvider.ts     #    Flota simulada (rutas reales, perfiles de vuelo)
+│     ├─ adsbV2Provider.ts   #    Formato "v2" (adsb.lol, ADSB.one, adsb.fi…)
+│     ├─ adsbLolProvider.ts  #    adsb.lol
+│     ├─ fr24ZoneProvider.ts #    Feed global de Flightradar24 (JSONP)
+│     ├─ openSkyProvider.ts  #    OpenSky Network
+│     ├─ autoProvider.ts     #    Carrera multi-red y fusión
+│     └─ jsonp.ts            #    Transporte JSONP
 ├─ engine/
-│  └─ fleetController.ts    # Bucle de animación, interpolación y publicación de datos
+│  └─ fleetController.ts     # Bucle de animación, interpolación y publicación
 ├─ map/
-│  ├─ style.ts              # Estilos de OpenFreeMap y nombres del mapa
-│  ├─ aircraftIcons.ts      # Iconos de avión generados en canvas
-│  ├─ aircraftLayers.ts     # Fuentes y capas de MapLibre
-│  └─ palette.ts            # Bandas de altitud y colores
-├─ components/              # UI: barra superior, lista, ficha, ajustes, estado
-├─ hooks/                   # Puente entre el controlador y React
-└─ config.ts                # Constantes y valores por defecto
+│  ├─ style.ts               #    Estilos de OpenFreeMap y nombres del mapa
+│  ├─ silhouettes.ts         #    Siluetas dibujadas en canvas
+│  ├─ aircraftIcons.ts       #    Selección de sprite por aeronave
+│  ├─ aircraftLayers.ts      #    Fuentes y capas de MapLibre
+│  └─ palette.ts             #    Colores y bandas de altitud
+├─ components/               # UI: barra, ficha, tabla, ajustes, leyenda…
+│  ├─ TopBar.tsx            #    Marca, búsqueda, selector de proveedor
+│  ├─ AirportHubs.tsx       #    Accesos rápidos a aeropuertos
+│  ├─ HubsManager.tsx       #    Editor de accesos y carpetas
+├─ hooks/                    # Puente entre el controlador y React
+├─ lib/                      # Formateadores y almacenamiento local
+└─ config.ts                 # Constantes y valores por defecto
 ```
 
 ### Capa de datos modular
@@ -95,90 +178,90 @@ interface AircraftProvider {
   readonly label: string
   readonly mode: 'simulated' | 'live'
   readonly pollIntervalMs: number
+  readonly notice?: string                 // aviso mostrado en la barra de estado
+  readonly activeSource?: string           // red que respondió (modo «auto»)
   advance?(deltaMs: number): void          // sólo simuladores
   poll(viewport: Viewport, signal?: AbortSignal): Promise<Aircraft[]>
   dispose?(): void
 }
 ```
 
-El proveedor sólo responde a *«¿qué ves ahora?»*. Del resto se encarga el motor:
+El proveedor sólo responde a *«¿qué ves ahora?»*. Del resto se encarga el
+motor:
 
-1. **`FleetController`** mantiene un `Track` por aeronave con sus dos últimas posiciones.
-2. Entre sondeos **interpola** (y extrapola ligeramente) posición, altitud y rumbo, de modo que el
-   movimiento es fluido incluso si el feed se actualiza cada 10 s.
-3. Empuja un GeoJSON a MapLibre **~14 veces por segundo** y una instantánea a React **2 veces por
-   segundo**, así la interfaz nunca se re-renderiza a velocidad de animación.
+1. **`FleetController`** mantiene un `Track` por aeronave con sus dos últimas
+   posiciones.
+2. Entre sondeos **interpola** posición, altitud y rumbo, de modo que el
+   movimiento es fluido aunque el feed se actualice cada diez segundos.
+3. Empuja un GeoJSON a MapLibre **~14 veces por segundo** y una instantánea a
+   React **2 veces por segundo**, así la interfaz nunca se re-renderiza a
+   velocidad de animación.
 
-**Añadir otro proveedor** (OpenSky, ADS-B Exchange, un receptor local…) consiste en crear una clase
-que implemente `AircraftProvider` y registrar una entrada en `src/data/registry.ts`. Ni el motor ni
-la UI necesitan cambios.
-
-### Fuentes disponibles
-
-- **Demo (`demo`)** — flota simulada sobre rutas ortodrómicas entre aeropuertos reales, con
-  perfiles de ascenso, crucero y descenso, operadores coherentes con la región de origen y
-  reciclado de vuelos al aterrizar. No necesita conexión.
-- **adsb.lol (`adsblol`)** — feed ADS-B comunitario en directo
-  (`GET https://api.adsb.lol/v2/point/{lat}/{lon}/{radio}`). El servicio limita el radio a
-  **250 NM**, así que al alejar mucho el zoom la app avisa de que conviene acercarse.
+**Añadir otro proveedor** consiste en crear una clase que implemente
+`AircraftProvider` y registrarla en `src/data/registry.ts`. Ni el motor ni la
+interfaz necesitan cambios.
 
 ### Rendimiento
 
-- El bucle de animación es único (`requestAnimationFrame`) y está aislado de React.
-- La lista de vuelos sólo renderiza las 80 aeronaves más cercanas.
-- El rastro (estela) se calcula únicamente para la aeronave seleccionada.
-- La flota simulada es configurable (250 / 600 / 1200) y la velocidad de simulación admite ×1, ×2 y ×5.
+- Un único bucle de animación (`requestAnimationFrame`), aislado de React.
+- La tabla de tráfico renderiza como máximo 120 filas.
+- La estela se calcula únicamente para la aeronave seleccionada.
+- Los sprites se generan en canvas: 24 iconos (8 familias × 3 estados) por
+  menos de 4 KB de bundle.
 - Probado para una resolución de referencia de 2560 × 1440.
 
-## Interfaz
+## ✅ Calidad
 
-- **Barra superior:** estado del feed (demo / directo),buscador (`/` para enfocarlo) y contadores.
-- **Panel izquierdo:** tráfico ordenado por distancia al centro, con filtros por categoría.
-- **Ficha derecha:** ruta con progreso y ETA, métricas en vivo, *Centrar* y *Seguir* (la cámara
-  acompaña al avión; se desactiva al arrastrar el mapa).
-- **Barra inferior:** leyenda de altitudes, créditos y estado de la última actualización.
-- **Ajustes:** proveedor de datos, estilo de mapa (Positron, Bright, Liberty, Dark, Fiord, 3D),
-  tamaño de flota, velocidad, etiquetas, nombres del mapa, estela, «solo en vuelo» y
-  atajos de cámara (Global, Europa, España, EE. UU., Asia-Pacífico).
-- **Atajos:** `/` busca, `Esc` cierra la ficha o limpia la búsqueda.
+| Control                    | Qué garantiza                                        |
+| -------------------------- | ----------------------------------------------------- |
+| `tsc` en modo estricto     | Tipado total, sin `any` implícitos                     |
+| `npm run smoke`            | Normalizadores de los feeds, geodesia, búsqueda, siluetas |
+| `npm run check:render`     | La interfaz se monta sin errores en un DOM headless    |
+| CodeQL                     | Análisis estático de seguridad                         |
+| Dependabot                 | Dependencias y acciones al día                         |
 
-La paleta de altitudes es la convencional en seguimiento de vuelo: gris en tierra, cian, verde,
-amarillo, naranja y rojo a medida que se gana altura.
+## 🚀 Despliegue
 
-## Despliegue
+El workflow [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
+compila y publica en **GitHub Pages** cada `push` a `main` (o manualmente con
+*Run workflow*). La ruta base del build se ajusta automáticamente al nombre
+del repositorio.
 
-El workflow `.github/workflows/deploy.yml` compila y publica en **GitHub Pages** cada `push` a
-`main` (o manualmente con *Run workflow*). El `base` del build se ajusta automáticamente a
-`/FrameFR/` en producción; usa `VITE_BASE_PATH` para otro destino.
-
-**Activación única (no se puede automatizar desde la API con permisos de integración):**
+**Activación única (no se puede automatizar desde la API con permisos de
+integración):**
 
 1. Entra en **Settings → Pages**.
 2. En *Build and deployment → Source* elige **GitHub Actions**.
-3. Guarda y, si quieres publicar ya, abre el último run de *Deploy to GitHub Pages* y pulsa
-   **Re-run all jobs** (o haz cualquier push a `main`).
+3. Guarda y, si quieres publicar ya, abre el último run de *Deploy to GitHub
+   Pages* y pulsa **Re-run all jobs** (o haz cualquier push a `main`).
 
-Cuando esté activo, la app quedará en:
+Cuando esté activo, la app queda en:
 
 ```
 https://acastejongames.github.io/FrameFR/
 ```
 
-> Si prefieres otro hosting (Netlify, Cloudflare Pages, Vercel…), basta con `npm run build` y
-> publicar `dist/` como sitio estático. Para servirlo desde la raíz de un dominio, define
-> `VITE_BASE_PATH=/`.
+> Si prefieres otro hosting (Netlify, Cloudflare Pages, Vercel…), basta con
+> `npm run build` y publicar `dist/` como sitio estático. Para servirlo desde
+> la raíz de un dominio, define `VITE_BASE_PATH=/`.
 
-## Créditos
+## 📄 Créditos
 
 - Cartografía: [OpenFreeMap](https://openfreemap.org) · [OpenMapTiles](https://www.openmaptiles.org/) ·
   © [OpenStreetMap](https://www.openstreetmap.org/copyright).
-- Datos ADS-B en directo: [adsb.lol](https://adsb.lol).
-- Glifos del mapa: [OpenFreeMap](https://openfreemap.org).
+- Datos ADS-B: [adsb.lol](https://adsb.lol) · [ADSB.one](https://www.adsb.one) ·
+  [adsb.fi](https://adsb.fi) · [airplanes.live](https://airplanes.live) ·
+  [Flightradar24](https://www.flightradar24.com) · [OpenSky Network](https://opensky-network.org).
+- Fotografías: [Planespotters](https://www.planespotters.net) · JetPhotos ·
+  [Wikimedia Commons](https://commons.wikimedia.org).
+- Iconos: [Lucide](https://lucide.dev) · [MapLibre GL](https://maplibre.org) ·
+  [Tailwind CSS](https://tailwindcss.com).
 
-## Hoja de ruta
+> Los datos ADS-B son públicos y gratuitos, pero **no** son un producto
+> contractual: su disponibilidad cambia según la red de receptores. Usa
+> AeroScope con criterio y no para fines que puedan poner en riesgo la
+> seguridad del vuelo.
 
-- [ ] Agrupación (*clustering*) de aeronaves a bajo zoom.
-- [ ] Enriquecimiento de ruta (origen/destino) para feeds en directo mediante adsbdb.
-- [ ] Filtro por rango de altitud y por aerolínea.
-- [ ] Capa de aeropuertos y rutas dibujadas sobre el mapa.
-- [ ] Modo de bajo consumo para dispositivos móviles.
+## 📄 Licencia
+
+[MIT](LICENSE) © FrameFR contributors.
