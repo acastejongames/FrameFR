@@ -1,3 +1,13 @@
+## 0.2.0 — 2026-10-19
+
+- Integración modular de meteorología del HTML AeroScope: radar RainViewer y
+  cuadrícula Open-Meteo, con procedencia y limitaciones visibles.
+- Cancelación, debounce, caché acotada, timeout y limpieza de capas meteorológicas.
+- Corrección de inclinación 3D después de cambiar la cartografía.
+- Recuperación de errores de interfaz y aviso sin JavaScript.
+- Pruebas meteorológicas y publicación directa desde la rama de entrega,
+  con pruebas obligatorias antes del despliegue de GitHub Pages.
+
 # Changelog
 
 Todas las novedades de AeroScope se documentan aquí. El formato sigue

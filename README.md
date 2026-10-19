@@ -44,7 +44,7 @@ mueven en el mapa son las que los receptores están leyendo del cielo.
 ```bash
 git clone https://github.com/acastejongames/FrameFR.git
 cd FrameFR
-npm install
+npm ci
 npm run dev          # http://localhost:5173
 ```
 
@@ -210,10 +210,40 @@ interfaz necesitan cambios.
   menos de 4 KB de bundle.
 - Probado para una resolución de referencia de 2560 × 1440.
 
+## Meteorología y alcance de la migración
+
+La base React existente sustituye los scripts globales, Tailwind por CDN y los
+manejadores inline del HTML aportado. Se conservan radar ADS-B, búsqueda,
+fichas, estelas, tabla, aeropuertos, preferencias, vista 3D y modo limpio.
+
+El panel **Meteorología** añade:
+
+- Radar de lluvia observado de RainViewer, con hora UTC del fotograma.
+- Viento, temperatura, precipitación y códigos WMO de Open-Meteo.
+- Cuadrícula explícita de 5×5 celdas: **no es un mapa de alta resolución**.
+- Una petición por sector, debounce de 700 ms, caché acotada de 5 minutos,
+  cancelación al cambiar de capa, timeout de 15 s y limpieza al desmontar.
+- Opacidad sin nuevas peticiones; actualización cada 5 minutos y al mover
+  el mapa para los datos de modelo. No se solicitan datos con la pestaña oculta.
+- Capas por debajo de las aeronaves, reconstruidas al cambiar de cartografía.
+
+Diferencias deliberadas respecto al HTML: no se reproducen las partículas de
+viento ni el suavizado que aparentaba mayor precisión. No se inventa una
+densidad de rayos a partir de precipitación/CAPE: tormentas muestra códigos
+WMO ≥ 95. No se incluye la integración opcional de OpenWeather con clave.
+Los valores ausentes no se convierten en cero ni en temperaturas de relleno.
+
+RainViewer y Open-Meteo son servicios externos sujetos a cobertura, CORS,
+cuotas y condiciones de uso; no se garantiza disponibilidad. Las teselas de
+radar pueden faltar aunque se hayan recibido los metadatos. Open-Meteo ofrece
+datos de modelo, no observaciones locales. Revisa sus planes para uso comercial.
+**No usar esta aplicación para navegación ni decisiones de seguridad aérea.**
+
 ## ✅ Calidad
 
 | Control                    | Qué garantiza                                        |
 | -------------------------- | ----------------------------------------------------- |
+| `npm run check`           | Tipos, pruebas y build en un único comando             |
 | `tsc` en modo estricto     | Tipado total, sin `any` implícitos                     |
 | `npm run smoke`            | Normalizadores de los feeds, geodesia, búsqueda, siluetas |
 | `npm run check:render`     | La interfaz se monta sin errores en un DOM headless    |
@@ -227,13 +257,15 @@ compila y publica en **GitHub Pages** cada `push` a `main` (o manualmente con
 *Run workflow*). La ruta base del build se ajusta automáticamente al nombre
 del repositorio.
 
-**Activación única (no se puede automatizar desde la API con permisos de
-integración):**
+**Publicación directa sin PR:** esta entrega se publica desde
+`arena/2444ad91-framefr`, también incluida en el disparador del workflow.
+`main` no se modifica. En Settings → Pages la fuente debe ser **GitHub Actions**;
+el entorno `github-pages` debe permitir la rama que se despliega.
+El workflow ejecuta pruebas de datos, montaje de interfaz y compilación antes
+de subir el artefacto; solo el job de despliegue publica en Pages.
 
-1. Entra en **Settings → Pages**.
-2. En *Build and deployment → Source* elige **GitHub Actions**.
-3. Guarda y, si quieres publicar ya, abre el último run de *Deploy to GitHub
-   Pages* y pulsa **Re-run all jobs** (o haz cualquier push a `main`).
+Para volver a publicar esta entrega: haz push a esa rama, o ejecuta
+`gh workflow run deploy.yml --ref arena/2444ad91-framefr`.
 
 Cuando esté activo, la app queda en:
 

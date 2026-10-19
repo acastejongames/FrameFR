@@ -27,6 +27,7 @@ import { MapControls } from '@/components/MapControls'
 import { SettingsModal } from '@/components/SettingsModal'
 import { StatusLegend } from '@/components/StatusLegend'
 import { Toast } from '@/components/Toast'
+import { WeatherPanel } from '@/components/WeatherPanel'
 import { TopBar } from '@/components/TopBar'
 
 /** Toast helper: a message plus a monotonically increasing key. */
@@ -288,6 +289,8 @@ export default function App() {
         onZoomChange={setTrackingZoom}
         onError={setMapError}
       />
+
+      <WeatherPanel map={handle?.map ?? null} />
 
       <TopBar
         ref={searchRef}

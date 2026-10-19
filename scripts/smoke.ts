@@ -9,6 +9,7 @@
  *
  * Run with:  npm run smoke
  */
+import { weatherGrid, normalizeForecast, latestRadar } from '../src/data/weather'
 import { DemoProvider } from '../src/data/providers/demoProvider'
 import { distanceNm } from '../src/data/geo'
 import { resolveSearchIntent } from '../src/data/globalSearch'
@@ -306,6 +307,24 @@ console.log('· Enriquecimiento con el código de aerolínea…')
   enrichWithAirline(aircraft)
   check(aircraft.airlineName === 'Ryanair', `aerolínea: incorrecta (${aircraft.airlineName})`)
   check(aircraft.flightNumber === 'FR1234', `vuelo: incorrecto (${aircraft.flightNumber})`)
+}
+
+console.log('· Meteorología: cuadrícula, valores ausentes y validación de radar…')
+{
+  const cells = weatherGrid(170, -10, 190, 10)
+  check(cells.length === 25, 'meteorología: cuadrícula acotada')
+  check(cells.every(c => c.lon >= -180 && c.lon <= 180), 'meteorología: antimeridiano')
+  check(weatherGrid(0, 90, 1, 100).length === 0, 'meteorología: latitudes fuera del modelo')
+  check(weatherGrid(NaN, 0, 1, 1).length === 0, 'meteorología: coordenadas inválidas')
+  const data = normalizeForecast([{ current: { temperature_2m: 0 } }, { current: { temperature_2m: null } }], cells, 'temp')
+  check(data.features.length === 1 && data.features[0].properties?.value === 0, 'meteorología: conservar cero, omitir nulos')
+  check(normalizeForecast({}, cells, 'wind').features.length === 0, 'meteorología: no inventar datos')
+  check(latestRadar({ radar: { past: [{ path: '/v2/radar/123', time: 123 }] } }).time === 123, 'meteorología: radar válido')
+  for (const payload of [{}, { radar: { past: [{ path: '//evil.test', time: 1 }] } }]) {
+    let rejected = false
+    try { latestRadar(payload) } catch { rejected = true }
+    check(rejected, 'meteorología: rechazar metadatos inválidos')
+  }
 }
 
 if (failures > 0) {

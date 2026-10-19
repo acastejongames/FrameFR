@@ -14,6 +14,7 @@ try {
   await copyFile(join(dist, 'index.html'), join(dist, '404.html'))
   console.log('postbuild: dist/404.html creado')
 } catch (error) {
-  console.warn('postbuild: no se encontró dist/index.html, se omite el fallback 404')
-  console.warn(error)
+  console.error('postbuild: no se pudo crear el fallback 404')
+  console.error(error)
+  process.exitCode = 1
 }

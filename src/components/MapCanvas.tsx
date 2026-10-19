@@ -300,8 +300,8 @@ export function MapCanvas({
     const option = getBasemap(basemap)
     // Full rebuild (not diff) so the aircraft layers are cleanly re-added on style.load.
     map.setStyle(option.url, { diff: false })
-    map.setMaxPitch(option.pitch)
-    map.easeTo({ pitch: option.pitch, bearing: option.bearing, duration: 600 })
+    map.setMaxPitch(70)
+    map.easeTo({ pitch: latest.current.is3D ? 54 : option.pitch, bearing: option.bearing, duration: 600 })
   }, [basemap])
 
   /* 3D tilt is independent of the basemap. */

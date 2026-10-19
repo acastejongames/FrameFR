@@ -140,6 +140,7 @@ console.log('· Montando la aplicación en jsdom…')
 
 expect(html.includes('AERO'), 'no se ha pintado la marca AeroScope')
 expect(html.includes('Búsqueda global'), 'no se ha pintado el buscador global')
+expect(html.includes('Capa meteorológica'), 'no se ha pintado el selector meteorológico')
 expect(html.includes('UTC'), 'no se ha pintado el reloj UTC')
 expect(html.includes('Aviones'), 'no se ha pintado el contador de aeronaves')
 expect(html.includes('En vuelo'), 'no se ha pintado la leyenda inferior')

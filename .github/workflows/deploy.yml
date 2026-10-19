@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'arena/2444ad91-framefr']
   workflow_dispatch:
     inputs:
       base_path:
@@ -37,6 +37,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Data and render regression tests
+        run: npm run smoke && npm run check:render
 
       - name: Type check and build
         run: npm run build

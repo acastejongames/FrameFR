@@ -2,7 +2,7 @@ name: CodeQL
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'arena/2444ad91-framefr']
   pull_request:
     branches: [main]
   schedule:
