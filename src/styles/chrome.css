@@ -1,0 +1,690 @@
+/* Application chrome: search → destinations → map tools → quiet telemetry. */
+:root {
+  --chrome-top: 120px;
+  --chrome-bottom: 124px;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+button:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid #ffbe00;
+  outline-offset: 4px;
+}
+.app-topbar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 40;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 0 24px;
+  background: rgba(17, 21, 27, 0.96);
+  border-bottom: 1px solid #ffffff0d;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 4px 24px #0002;
+}
+.topbar-primary {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 32px;
+}
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.app-brand > svg {
+  height: 34px;
+  width: 34px;
+}
+.global-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  max-width: 520px;
+}
+.search-field {
+  height: 42px;
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.utc-widget {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 14px;
+  font-size: 12px;
+}
+.traffic-widget {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-left: 1px solid #ffffff12;
+  margin-right: 8px;
+}
+.header-action {
+  height: 42px;
+  min-width: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid #ffffff10;
+  background: #ffffff04;
+  border-radius: 10px;
+  color: #bec5ce;
+  font-size: 12px;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.header-action:hover {
+  background: #ffffff0d;
+  color: white;
+}
+.header-action[data-active='true'] {
+  color: #ffbe00;
+  background: #ffbe0014;
+  border-color: #ffbe0040;
+}
+.airport-strip {
+  position: absolute;
+  z-index: 32;
+  top: 84px;
+  left: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  pointer-events: none;
+}
+.airport-strip-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  color: #a1a8b4;
+  text-shadow: 0 1px 4px black;
+}
+.airport-hubs {
+  display: flex;
+  position: relative;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+  min-width: 0;
+}
+.airport-hub-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.airport-hubs button {
+  min-height: 32px;
+  border-radius: 7px;
+}
+.airport-hub-list > button {
+  padding: 5px 12px;
+  background: #171c23e8;
+  box-shadow: 0 2px 8px #0002;
+  white-space: nowrap;
+}
+.map-footer {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 35;
+  pointer-events: none;
+}
+.map-dock {
+  position: absolute;
+  bottom: calc(46px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px;
+  border-radius: 18px;
+  pointer-events: auto;
+  background: #151b23f5;
+  border-color: #ffffff14;
+  box-shadow:
+    0 12px 45px #0007,
+    0 1px 0 #ffffff08 inset;
+}
+.map-dock[hidden],
+.tool-popover[hidden] {
+  display: none;
+}
+.tool-anchor {
+  display: flex;
+}
+.dock-button {
+  position: relative;
+  min-width: 78px;
+  height: 58px;
+  padding: 8px 12px;
+  border-radius: 11px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  color: #aeb9c7;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.dock-button:hover {
+  background: #ffffff09;
+  color: white;
+}
+.dock-button[data-active='true'],
+.dock-button[aria-pressed='true'] {
+  background: #ffbe0010;
+  color: #ffd158;
+}
+.dock-button[aria-expanded='true'] {
+  background: #ffbe001c;
+  box-shadow: 0 0 0 1px #ffbe0030 inset;
+}
+.dock-chevron {
+  position: absolute;
+  right: 7px;
+  top: 9px;
+  opacity: 0.5;
+}
+.dock-divider {
+  height: 28px;
+  width: 1px;
+  margin: 0 4px;
+  background: #ffffff12;
+}
+.tool-active-dot {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ffbe00;
+}
+.tool-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 12px);
+  width: 410px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 250px);
+  overflow-y: auto;
+  border-radius: 16px;
+  padding: 20px;
+  pointer-events: auto;
+  text-align: left;
+  animation: fade-in 0.15s ease;
+}
+#map-tools {
+  left: 0;
+  right: auto;
+}
+.tool-popover-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.tool-popover-heading h2 {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #f1f4f8;
+}
+.tool-popover-heading p {
+  color: #8490a0;
+  font-size: 11px;
+  margin-top: 4px;
+}
+.tool-close {
+  display: grid;
+  place-items: center;
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #ffffff06;
+  color: #8e9aa9;
+}
+.tool-close:hover {
+  background: #ffffff10;
+  color: white;
+}
+.weather-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.weather-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 10px;
+  border: 1px solid #ffffff0c;
+  border-radius: 10px;
+  background: #ffffff03;
+  color: #8795a6;
+  text-align: left;
+}
+.weather-option svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.weather-option strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+  color: #c7cfd8;
+}
+.weather-option small {
+  display: block;
+  font-size: 9px;
+  margin-top: 5px;
+  line-height: 1.5;
+}
+.weather-option:hover {
+  background: #ffffff08;
+  border-color: #ffffff25;
+}
+.weather-option[aria-pressed='true'] {
+  background: #ffbe000b;
+  border-color: #ffbe0070;
+  color: #e4b74c;
+}
+.weather-option[aria-pressed='true'] strong {
+  color: #ffd158;
+}
+.weather-readout {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #ffffff0c;
+}
+.opacity-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 8px;
+  color: #b4bfcb;
+}
+.opacity-label span {
+  font-family: var(--font-mono);
+  color: #ffd158;
+}
+.weather-status {
+  font-size: 11px;
+  color: #c4ced8;
+  line-height: 1.6;
+  margin-top: 12px;
+}
+.weather-legend {
+  font-size: 10px;
+  line-height: 1.7;
+  color: #8998a9;
+  margin-top: 6px;
+}
+.tool-hint {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #8998a9;
+  margin-top: 16px;
+}
+.tool-footnote {
+  border-top: 1px solid #ffffff0c;
+  margin-top: 16px;
+  padding-top: 12px;
+  font-size: 9px;
+  color: #7f8c9c;
+  line-height: 1.6;
+}
+.basemap-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.basemap-option {
+  border: 1px solid #ffffff16;
+  border-radius: 11px;
+  padding: 5px;
+  font-size: 12px;
+  color: #adb9c7;
+}
+.basemap-option > span {
+  display: block;
+  padding: 10px 0 5px;
+}
+.basemap-option[aria-pressed='true'] {
+  border-color: #ffbe0080;
+  color: #ffd158;
+  background: #ffbe0008;
+}
+.map-swatch {
+  height: 72px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+  border-radius: 7px;
+  background-color: #182027;
+  background-image:
+    repeating-linear-gradient(
+      30deg,
+      transparent 0 18px,
+      #ffffff10 19px 20px,
+      transparent 21px 30px
+    ),
+    repeating-linear-gradient(
+      110deg,
+      transparent 0 22px,
+      #ffffff10 23px 24px,
+      transparent 25px 44px
+    );
+  color: #c2cbd6;
+}
+.map-swatch-positron {
+  background-color: #d5ddd9;
+  color: #475956;
+}
+.map-swatch-liberty {
+  background-color: #334b40;
+  color: #b1d2bd;
+}
+.swatch-check {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background: #ffbe00;
+  color: #171b20;
+  border-radius: 50%;
+  padding: 2px;
+}
+.map-status {
+  height: calc(30px + env(safe-area-inset-bottom, 0px));
+  padding: 0 20px env(safe-area-inset-bottom, 0px);
+  background: #10151be8;
+  border-top: 1px solid #ffffff08;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #97a2af;
+  font-size: 10px;
+}
+.status-legend,
+.status-telemetry {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+.status-legend > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.map-status i {
+  height: 5px;
+  width: 5px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.status-telemetry {
+  font-size: 9px;
+  gap: 10px;
+}
+.status-telemetry span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flight-side-panel {
+  position: fixed;
+  top: var(--chrome-top);
+  bottom: var(--chrome-bottom);
+  z-index: 25;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+}
+.flight-side-left {
+  left: 16px;
+}
+.flight-side-right {
+  right: 16px;
+}
+.restore-ui {
+  position: absolute;
+  right: 16px;
+  bottom: 24px;
+  z-index: 50;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 12px;
+  color: #ffd158;
+}
+.restore-ui kbd {
+  margin-left: 12px;
+  color: #8a97a8;
+}
+@media (max-width: 1100px) {
+  .utc-widget {
+    display: none;
+  }
+  .topbar-primary {
+    gap: 20px;
+  }
+  .app-topbar {
+    gap: 16px;
+    padding: 0 16px;
+  }
+  .traffic-widget {
+    padding: 0 8px;
+  }
+  .airport-strip {
+    left: 16px;
+    right: 16px;
+  }
+}
+@media (max-width: 700px) {
+  :root {
+    --chrome-top: 172px;
+    --chrome-bottom: 120px;
+  }
+  .app-topbar {
+    height: 120px;
+    align-items: flex-start;
+    padding: 12px;
+    gap: 8px;
+  }
+  .topbar-primary {
+    flex: initial;
+  }
+  .app-brand {
+    height: 40px;
+  }
+  .app-brand > svg {
+    width: 29px;
+    height: 29px;
+  }
+  .app-brand .cond {
+    font-size: 16px;
+  }
+  .app-brand .leading-none > div:last-child {
+    font-size: 7px;
+  }
+  .global-search {
+    position: absolute;
+    top: 66px;
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+  .header-action {
+    height: 38px;
+    min-width: 38px;
+    padding: 0 10px;
+  }
+  .header-action > span {
+    display: none;
+  }
+  .topbar-actions {
+    gap: 5px;
+  }
+  .traffic-widget {
+    border: 0;
+    padding: 0 4px;
+    margin: 0;
+    gap: 6px;
+    height: 38px;
+  }
+  .traffic-widget .tech.mt-0\.5 {
+    display: none;
+  }
+  .traffic-widget .uppercase {
+    display: none;
+  }
+  .airport-strip {
+    top: 132px;
+    left: 12px;
+    right: 12px;
+  }
+  .airport-strip-label {
+    display: none;
+  }
+  .airport-hubs {
+    width: 100%;
+  }
+  .airport-hub-list {
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex: 1;
+  }
+  .airport-hubs > button {
+    flex-shrink: 0;
+  }
+  .map-dock {
+    width: calc(100% - 24px);
+    max-width: 560px;
+    padding: 5px;
+    border-radius: 15px;
+    gap: 0;
+    bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+    justify-content: space-between;
+  }
+  .tool-anchor {
+    flex: 1;
+    min-width: 0;
+  }
+  .dock-button {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    height: 56px;
+    padding: 7px 3px;
+    font-size: 9px;
+    gap: 7px;
+  }
+  .dock-button svg:not(.dock-chevron) {
+    width: 19px;
+    height: 19px;
+  }
+  .dock-chevron,
+  .dock-divider {
+    display: none;
+  }
+  .tool-popover {
+    width: 100%;
+    max-height: calc(100dvh - 292px);
+    padding: 16px;
+  }
+  .map-status {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .status-legend {
+    gap: 12px;
+    font-size: 9px;
+  }
+  .status-telemetry {
+    display: none;
+  }
+  .flight-side-panel {
+    width: calc(100% - 24px);
+    max-width: none;
+    left: 12px;
+    right: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.dock-label-small {
+  display: none;
+}
+.weather-option > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+  .dock-label-wide {
+    display: none;
+  }
+  .dock-label-small {
+    display: inline;
+  }
+}
+@media (max-width: 380px) {
+  .traffic-widget {
+    display: none;
+  }
+  .weather-option {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+.utc-widget[hidden],
+.traffic-widget[hidden] {
+  display: none;
+}

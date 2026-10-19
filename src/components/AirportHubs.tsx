@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react'
+import { Folder, Plus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { MAX_HUB_SLOTS, type HubFolder, type HubItem } from '@/data/hubs'
 
@@ -43,8 +43,8 @@ export function AirportHubs({
   const slots = items.slice(0, MAX_HUB_SLOTS)
 
   return (
-    <div ref={wrapperRef} className="pointer-events-auto relative flex shrink-0 items-center gap-1">
-        <div className="flex items-center gap-1">
+    <div ref={wrapperRef} className="airport-hubs">
+        <div className="airport-hub-list">
           {slots.map((item) => {
             if (item.type === 'folder') {
               const open = openFolderId === item.id
@@ -54,13 +54,14 @@ export function AirportHubs({
                   type="button"
                   onClick={() => setOpenFolderId(open ? null : item.id)}
                   title={`Carpeta: ${item.name}`}
+                  aria-expanded={open}
                   className={`tech flex items-center gap-1 rounded px-2 py-1 text-[11px] transition ${
                     open
                       ? 'bg-accent font-bold text-[#111317]'
                       : 'border border-white/[0.09] bg-ink-700 text-white/70 hover:bg-ink-600 hover:text-white'
                   }`}
                 >
-                  <span>📁 {item.name}</span>
+                  <Folder size={13} aria-hidden="true" /><span>{item.name}</span>
                   <span className="opacity-70">({item.airports.length})</span>
                 </button>
               )
@@ -94,7 +95,7 @@ export function AirportHubs({
           folder={slots.find(
             (item): item is HubFolder => item.type === 'folder' && item.id === openFolderId,
           )}
-          onFlyTo={onFlyTo}
+          onFlyTo={(...args) => { setOpenFolderId(null); onFlyTo(...args) }}
         />
       )}
     </div>
@@ -112,7 +113,7 @@ function FolderDropdown({
   return (
     <div className="panel-raised absolute left-0 top-9 z-50 min-w-[210px] divide-y divide-white/[0.05] rounded-md py-1">
       <div className="tech flex items-center justify-between bg-[#14171c] px-2.5 py-1 text-[10px] uppercase text-accent">
-        <span>📁 {folder.name}</span>
+        <span className="flex items-center gap-2"><Folder size={13} aria-hidden="true" />{folder.name}</span>
         <span>{folder.airports.length} aeropuertos</span>
       </div>
       {folder.airports.length === 0 ? (

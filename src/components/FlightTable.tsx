@@ -45,7 +45,7 @@ export function FlightTable({
   }, [aircraft, sortBy])
 
   return (
-    <aside className="panel-raised fixed bottom-12 right-2.5 top-14 z-20 flex w-[340px] flex-col overflow-hidden rounded-lg sm:w-[380px]">
+    <aside className="panel-raised flight-side-panel flight-side-right">
       <div className="flex shrink-0 items-center justify-between border-b border-white/[0.07] bg-[#14171c] px-3.5 py-2.5">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-accent" />

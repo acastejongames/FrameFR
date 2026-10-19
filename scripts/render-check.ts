@@ -32,6 +32,8 @@ Object.defineProperty(globalThis, 'navigator', {
 })
 globalAny.HTMLElement = window.HTMLElement
 globalAny.HTMLInputElement = window.HTMLInputElement
+globalAny.HTMLTextAreaElement = window.HTMLTextAreaElement
+globalAny.HTMLSelectElement = window.HTMLSelectElement
 globalAny.HTMLCanvasElement = window.HTMLCanvasElement
 globalAny.Element = window.Element
 globalAny.Node = window.Node
@@ -150,6 +152,41 @@ expect(text.includes('AERO'), 'no se ha pintado el texto de la marca')
 /* The demo provider must have produced traffic by now. */
 const counterText = text.match(/(\d+)\s*Aviones/)
 expect(Boolean(counterText) && Number(counterText?.[1]) > 0, 'el contador de aeronaves sigue a cero')
+
+console.log('· Herramientas: desplegables, teclado, exclusión mutua y modo limpio…')
+const flush = () => new Promise(resolve => setTimeout(resolve, 40))
+const weatherTrigger = container.querySelector<HTMLButtonElement>('[aria-controls="weather-tools"]')!
+const mapTrigger = container.querySelector<HTMLButtonElement>('[aria-controls="map-tools"]')!
+const weatherPanel = container.querySelector<HTMLElement>('#weather-tools')!
+const mapPanel = container.querySelector<HTMLElement>('#map-tools')!
+expect(weatherPanel.hidden && mapPanel.hidden, 'los paneles deben comenzar cerrados')
+weatherTrigger.click()
+await flush()
+expect(!weatherPanel.hidden && weatherTrigger.getAttribute('aria-expanded') === 'true', 'meteorología no abre')
+expect(window.document.activeElement?.getAttribute('aria-label') === 'Cerrar Meteorología', 'foco inicial del desplegable')
+mapTrigger.click()
+await flush()
+expect(weatherPanel.hidden && !mapPanel.hidden, 'solo puede haber un desplegable abierto')
+window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+await flush()
+expect(mapPanel.hidden && window.document.activeElement === mapTrigger, 'Escape debe cerrar y restaurar foco')
+weatherTrigger.click()
+await flush()
+window.document.body.dispatchEvent(new window.Event('pointerdown', { bubbles: true }))
+await flush()
+expect(weatherPanel.hidden, 'clic fuera debe cerrar meteorología')
+const labels = container.querySelector<HTMLButtonElement>('[title="Mostrar u ocultar etiquetas de vuelo"]')!
+labels.click()
+await flush()
+expect(labels.getAttribute('aria-pressed') === 'false', 'etiquetas debe actualizar su estado accesible')
+container.querySelector<HTMLButtonElement>('[title="Ocultar interfaz (U)"]')!.click()
+await flush()
+expect(window.document.body.classList.contains('ui-clean-mode'), 'no se activa el modo limpio')
+const restore = container.querySelector<HTMLButtonElement>('.restore-ui')
+expect(Boolean(restore), 'el modo limpio debe tener salida táctil')
+restore?.click()
+await flush()
+expect(!window.document.body.classList.contains('ui-clean-mode'), 'no se restaura la interfaz')
 
 /* The critical runtime errors that must not appear. */
 const fatalPatterns = [

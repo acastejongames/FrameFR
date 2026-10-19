@@ -1,7 +1,23 @@
-import { Compass, EyeOff, LocateFixed, Tag } from 'lucide-react'
+import { useCallback, useState } from 'react'
+import {
+  Compass,
+  EyeOff,
+  LocateFixed,
+  Tag,
+  Layers,
+  ChevronUp,
+  Moon,
+  Sun,
+  Mountain,
+  Check,
+} from 'lucide-react'
+import type { Map } from 'maplibre-gl'
 import type { BasemapId } from '@/map/style'
+import { ToolPopover } from './ToolPopover'
+import { WeatherPanel } from './WeatherPanel'
 
 interface MapControlsProps {
+  map: Map | null
   basemap: BasemapId
   onBasemapChange: (id: BasemapId) => void
   showLabels: boolean
@@ -13,16 +29,14 @@ interface MapControlsProps {
   onLocate: () => void
   visible: boolean
 }
+const STYLES = [
+  { id: 'dark', label: 'Oscuro', icon: Moon },
+  { id: 'positron', label: 'Claro', icon: Sun },
+  { id: 'liberty', label: 'Terreno', icon: Mountain },
+] as const
 
-/** Styles offered in the bottom right cluster (the full list lives in settings). */
-const QUICK_STYLES: Array<{ id: BasemapId; label: string }> = [
-  { id: 'dark', label: 'Oscuro' },
-  { id: 'positron', label: 'Claro' },
-  { id: 'liberty', label: 'Terreno' },
-]
-
-/** Bottom right cluster: cartographic style, labels, 3D, clean mode, GPS. */
 export function MapControls({
+  map,
   basemap,
   onBasemapChange,
   showLabels,
@@ -34,79 +48,104 @@ export function MapControls({
   onLocate,
   visible,
 }: MapControlsProps) {
-  if (!visible) return null
-
+  const [panel, setPanel] = useState<'map' | 'weather' | null>(null)
+  const close = useCallback(() => setPanel(null), [])
+  // Keep weather mounted when the toolbar is hidden: hiding UI must not disable a layer.
   return (
-    <div className="pointer-events-auto flex items-center gap-1.5" data-clean-hide>
-      <div className="panel flex items-center gap-1 rounded-md p-1 text-xs">
-        {QUICK_STYLES.map((style) => (
+    <nav
+      className="map-dock panel"
+      aria-label="Herramientas del mapa"
+      data-clean-hide
+      hidden={!visible}
+    >
+      <ToolPopover
+        id="map-tools"
+        title="Estilo del mapa"
+        subtitle="Elige la cartografía de tu radar"
+        open={panel === 'map'}
+        onClose={close}
+        trigger={
           <button
-            key={style.id}
             type="button"
-            onClick={() => onBasemapChange(style.id)}
-            className={`rounded px-2.5 py-1 text-[11px] transition ${
-              basemap === style.id
-                ? 'bg-accent font-bold text-[#111317]'
-                : 'text-white/65 hover:bg-white/[0.06] hover:text-white'
-            }`}
+            className="dock-button"
+            data-active={panel === 'map'}
+            onClick={() => setPanel(panel === 'map' ? null : 'map')}
+            aria-expanded={panel === 'map'}
+            aria-controls="map-tools"
+            aria-haspopup="dialog"
           >
-            {style.label}
+            <Layers size={20} />
+            <span>Mapa</span>
+            <ChevronUp size={13} className="dock-chevron" />
           </button>
-        ))}
-      </div>
-
+        }
+      >
+        <div className="basemap-options">
+          {STYLES.map((style) => (
+            <button
+              type="button"
+              key={style.id}
+              className="basemap-option"
+              aria-pressed={basemap === style.id}
+              onClick={() => onBasemapChange(style.id)}
+            >
+              <div className={`map-swatch map-swatch-${style.id}`}>
+                <style.icon size={24} />
+                {basemap === style.id && <Check size={16} className="swatch-check" />}
+              </div>
+              <span>{style.label}</span>
+            </button>
+          ))}
+        </div>
+        <p className="tool-hint">La cartografía cambia; tus vuelos y capas se mantienen.</p>
+      </ToolPopover>
+      <WeatherPanel
+        map={map}
+        open={panel === 'weather'}
+        onToggle={() => setPanel(panel === 'weather' ? null : 'weather')}
+        onClose={close}
+      />
+      <span className="dock-divider" />
       <button
         type="button"
+        className="dock-button"
+        aria-pressed={showLabels}
         onClick={() => onShowLabelsChange(!showLabels)}
-        className={`flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-[11px] transition ${
-          showLabels
-            ? 'border-accent/40 bg-accent/12 text-accent'
-            : 'border-white/[0.09] bg-ink-700 text-white/65 hover:bg-ink-600'
-        }`}
-        title="Mostrar u ocultar las etiquetas de vuelo"
+        title="Mostrar u ocultar etiquetas de vuelo"
       >
-        <Tag className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Etiquetas</span>
+        <Tag size={20} />
+        <span>Etiquetas</span>
       </button>
-
       <button
         type="button"
+        className="dock-button"
+        aria-pressed={is3D}
         onClick={() => on3DChange(!is3D)}
-        className={`flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-[11px] transition ${
-          is3D
-            ? 'border-accent/40 bg-accent/12 text-accent'
-            : 'border-white/[0.09] bg-ink-700 text-white/65 hover:bg-ink-600'
-        }`}
-        title="Inclinación 3D"
+        title="Inclinación del mapa"
       >
-        <Compass className="h-3.5 w-3.5" />
+        <Compass size={20} />
         <span>3D</span>
       </button>
-
+      <span className="dock-divider" />
       <button
         type="button"
-        onClick={onCleanModeToggle}
-        className={`tech flex items-center gap-1 rounded border px-2 py-1.5 text-[11px] transition ${
-          cleanMode
-            ? 'border-accent/40 bg-accent/12 text-accent'
-            : 'border-white/[0.09] bg-ink-700 text-white/65 hover:bg-ink-600'
-        }`}
-        title="Ocultar o mostrar la interfaz (tecla U)"
-        aria-pressed={cleanMode}
-      >
-        <EyeOff className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">[U]</span>
-      </button>
-
-      <button
-        type="button"
+        className="dock-button"
         onClick={onLocate}
-        className="rounded border border-white/[0.09] bg-ink-700 p-1.5 text-white/65 transition hover:bg-ink-600 hover:text-white"
-        title="Mi ubicación GPS"
-        aria-label="Mi ubicación GPS"
+        title="Centrar en mi ubicación"
       >
-        <LocateFixed className="h-4 w-4" />
+        <LocateFixed size={20} />
+        <span>Ubicación</span>
       </button>
-    </div>
+      <button
+        type="button"
+        className="dock-button"
+        aria-pressed={cleanMode}
+        onClick={onCleanModeToggle}
+        title="Ocultar interfaz (U)"
+      >
+        <EyeOff size={20} />
+        <span>Ocultar</span>
+      </button>
+    </nav>
   )
 }

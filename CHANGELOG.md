@@ -1,3 +1,16 @@
+## Reorganización de interfaz — 2026-10-19
+
+- Cabecera con buscador amplio, acciones de tráfico y ajustes; aeropuertos en
+  una fila independiente y desplazable en móvil.
+- Barra inferior centrada: mapa, meteorología, etiquetas, 3D, ubicación y
+  modo limpio, con tamaños y estados consistentes.
+- Paneles de mapa y meteorología con selección visual, exclusión mutua,
+  cierre exterior/Escape, gestión de foco y atributos accesibles.
+- Telemetría compacta separada de las herramientas y paneles de vuelos
+  reposicionados para respetar las nuevas barras.
+- Diseño adaptable desde 320 px y botón táctil para recuperar la interfaz.
+- Pruebas de regresión de interacción incorporadas al render check.
+
 ## Corrección del worker de MapLibre
 
 - Empaquetado explícito del worker de MapLibre 6 y sus dependencias con Vite.

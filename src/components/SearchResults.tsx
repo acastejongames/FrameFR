@@ -29,7 +29,7 @@ export function SearchResults({ results, searching, query, onSelect }: SearchRes
 
   if (results.length === 0) {
     return (
-      <div className="panel-raised absolute left-0 right-0 top-9 z-50 max-h-80 overflow-y-auto rounded-md">
+      <div className="panel-raised absolute left-0 right-0 top-[calc(100%+8px)] z-50 max-h-80 overflow-y-auto rounded-md">
         {header}
         <div className="px-3 py-3 text-xs text-white/40">
           {searching
@@ -41,7 +41,7 @@ export function SearchResults({ results, searching, query, onSelect }: SearchRes
   }
 
   return (
-    <div className="panel-raised absolute left-0 right-0 top-9 z-50 max-h-80 divide-y divide-white/[0.05] overflow-y-auto rounded-md">
+    <div className="panel-raised absolute left-0 right-0 top-[calc(100%+8px)] z-50 max-h-80 divide-y divide-white/[0.05] overflow-y-auto rounded-md">
       {header}
       {results.slice(0, 25).map((aircraft) => {
         const iata =
