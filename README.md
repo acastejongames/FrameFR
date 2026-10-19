@@ -120,10 +120,11 @@ completa con:
   72,7 m / 39,5 m / 56,7 m). Debajo se dibuja **el mapa real** sobre la posición
   del avión —imágenes satelitales de Esri con relieve de terreno (Terrarium) y
   respaldo de OpenStreetMap— con cielo y horizonte; el avión vuela a su
-  **altitud real** con una línea de referencia al suelo y rumbo al norte. La
-  cámara arranca en persecución detrás del avión; arrastra para **orbitar**,
-  usa la rueda para acercar y `Esc` cierra. El terreno se re-centra y recarga
-  según el avión avanza y su altitud.
+  **altitud real** y rumbo informado. La cámara arranca en persecución detrás
+  del avión; arrastra para **orbitar**, usa la rueda para acercar y `Esc`
+  cierra. La ventana de suelo alcanza ~160 km de visión en crucero (menos
+  según baja la altitud) y su borde se funde con el cielo en el horizonte; se
+  re-centra y recarga según el avión avanza y su altitud.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
   altitud, velocidad o indicativo.
 - **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
@@ -239,12 +240,12 @@ interfaz necesitan cambios.
   menos de 4 KB de bundle.
 - Three.js, los modelos GLB y las teselas del terreno solo se descargan al
   abrir la *Vista 3D* (chunk `Aircraft3DViewer` diferido). El suelo compone
-  8×8 teselas satelitales (~40–80 km según altitud) más el relieve del DEM
-  público de Terrarium, y se re-centra cada pocos kilómetros de vuelo. El
-  modelo se normaliza en tiempo de ejecución a la longitud real de su variante:
-  escala 1:1 garantizada aunque cada GLB venga en unidades distintas. La página
-  de desarrollo `model-check.html` renderiza los cinco modelos con el registro
-  real.
+  8×8 teselas satelitales (~20–160 km de lado según altitud) más el relieve del
+  DEM público de Terrarium, y se re-centra solo cuando el avión se aleja lo
+  bastante del centro del parche. El modelo se normaliza en tiempo de ejecución
+  a la longitud real de su variante: escala 1:1 garantizada aunque cada GLB
+  venga en unidades distintas. La página de desarrollo `model-check.html`
+  renderiza los cinco modelos con el registro real.
 - Probado para una resolución de referencia de 2560 × 1440.
 
 ## Meteorología y alcance de la migración

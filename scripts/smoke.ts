@@ -509,22 +509,37 @@ console.log('· Teselas del terreno del visor 3D…')
   check(Math.abs(metersPerPixel(60, 0) - 156_543.03 * 0.5) < 0.01, 'teselas: corrección de latitud')
   check(tileZoomForAltitude(0) === 14 && tileZoomForAltitude(799) === 14, 'teselas: zoom 14 cerca del suelo')
   check(tileZoomForAltitude(800) === 13 && tileZoomForAltitude(2999) === 13, 'teselas: zoom 13 en aproximación')
-  check(tileZoomForAltitude(3000) === 12 && tileZoomForAltitude(11_000) === 12, 'teselas: zoom 12 en crucero')
+  check(tileZoomForAltitude(3000) === 12 && tileZoomForAltitude(8999) === 12, 'teselas: zoom 12 en ascenso')
+  check(tileZoomForAltitude(9000) === 11 && tileZoomForAltitude(12_000) === 11, 'teselas: zoom 11 en crucero')
   const pos = tilePosition(0, 0, 1)
   check(pos.fx === 1 && Math.abs(pos.fy - 1) < 1e-9, 'teselas: posición mundial en el centro')
   const win = groundWindow(0, 0, 13)
   check(win.x0 === 4092 && win.y0 === 4092 && win.n === 8, 'teselas: ventana alineada a teselas')
   check(Math.abs(win.offsetEastM) < 1e-6 && Math.abs(win.offsetNorthM) < 1e-6, 'teselas: centro exacto sin desfase')
   check(Math.abs(win.sizeMeters - 8 * 256 * (156_543.03 / 8192)) < 1, 'teselas: 39 km de lado en z13')
+  const cruise = groundWindow(40, -3.5, 11)
+  check(cruise.sizeMeters > 115_000 && cruise.sizeMeters < 125_000, 'teselas: ~120 km de lado en z11 a latitud media')
   const terrain = terrainTilesOf(win)
   check(
-    terrain.z === 15 && terrain.x0 === win.x0 * 4 && terrain.y0 === win.y0 * 4,
-    'teselas: el DEM z+2 cubre exactamente la misma ventana',
+    terrain.z === 11 && terrain.x0 === Math.floor(win.x0 / 4) && terrain.y0 === Math.floor(win.y0 / 4),
+    'teselas: el DEM z-2 cubre exactamente la misma ventana',
+  )
+  check(
+    terrain.offsetX === (win.x0 - terrain.x0 * 4) * 64 &&
+      terrain.offsetY === (win.y0 - terrain.y0 * 4) * 64 &&
+      terrain.offsetX + 512 <= 3 * 256 &&
+      terrain.offsetY + 512 <= 3 * 256,
+    'teselas: la ventana del DEM cabe en el bloque 3x3',
   )
   const off = groundWindow(40, -3.5, 13)
   check(
     Math.abs(off.offsetEastM) <= off.sizeMeters / 2 && Math.abs(off.offsetNorthM) <= off.sizeMeters / 2,
     'teselas: el desfase queda dentro de la ventana',
+  )
+  const terrainOff = terrainTilesOf(off)
+  check(
+    [0, 64, 128, 192].includes(terrainOff.offsetX) && [0, 64, 128, 192].includes(terrainOff.offsetY),
+    'teselas: el desfase del DEM cae en la rejilla de píxel',
   )
   check(decodeTerrariumPixel(128, 0, 0) === 0, 'teselas: terrarium nivel del mar')
   check(decodeTerrariumPixel(129, 0, 0) === 256, 'teselas: terrarium +256 m')

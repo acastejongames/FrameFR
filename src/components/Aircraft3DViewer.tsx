@@ -33,8 +33,8 @@ const SKY_HORIZON = '#d4e4f0'
 const GROUND_BG = 0x0d1218
 /** Terrain mesh resolution (vertices per side). */
 const MESH_SEGMENTS = 256
-/** Re-centre the ground patch after this much drift, meters. */
-const REFRESH_DRIFT_M = 3_000
+/** Minimum drift before the ground patch re-centres, meters (scales with the window). */
+const REFRESH_DRIFT_M = 2_000
 
 interface SceneState {
   renderer: THREE.WebGLRenderer
@@ -44,7 +44,6 @@ interface SceneState {
   pivot: THREE.Group
   groundGroup: THREE.Group
   groundObject: THREE.Object3D | null
-  dropLine: THREE.Line
   scaledHeightM: number
   raf: number
   disposed: boolean
@@ -132,15 +131,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
       const groundGroup = new THREE.Group()
       scene.add(groundGroup)
 
-      // Drop line from mean sea level up to the aircraft (real altitude).
-      const dropMaterial = new THREE.LineBasicMaterial({ color: 0xffbe00, transparent: true, opacity: 0.75 })
-      const dropGeometry = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(0, 1, 0),
-      ])
-      const dropLine = new THREE.Line(dropGeometry, dropMaterial)
-      scene.add(dropLine)
-
       // Pivot centred where the model's bounding-box centre will sit.
       const pivot = new THREE.Group()
       scene.add(pivot)
@@ -154,7 +144,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         pivot,
         groundGroup,
         groundObject: null,
-        dropLine,
         scaledHeightM: model.realLengthM * 0.3,
         raf: 0,
         disposed: false,
@@ -223,10 +212,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
           liveRef.current.model.noseAlongPositiveX,
         )
         state.controls.target.y = y
-        const positions = state.dropLine.geometry.attributes.position as THREE.BufferAttribute
-        positions.setXYZ(0, 0, 0, 0)
-        positions.setXYZ(1, 0, y, 0)
-        positions.needsUpdate = true
 
         // The map moves under the aircraft so the flight is visible against the
         // real terrain. Scene axes: +X = east, -Z = north.
@@ -454,10 +439,12 @@ function requestGround(
   const altitudeM = live.onGround ? 0 : live.altitude * 0.3048
   const z = tileZoomForAltitude(altitudeM)
   const drift = Math.hypot(state.groundEastM, state.groundNorthM)
+  // Wide cruise windows tolerate more drift before paying for a re-fetch.
+  const driftLimit = Math.max(REFRESH_DRIFT_M, (state.patchWindow?.sizeMeters ?? 0) * 0.08)
   const needs =
     !state.patchWindow ||
     state.patchWindow.z !== z ||
-    drift > REFRESH_DRIFT_M
+    drift > driftLimit
   if (!needs || state.fetching) return
   state.fetching = true
   if (!state.patchWindow) setGroundLoading(true)
@@ -538,7 +525,7 @@ function applyPatch(
   state.scene.fog = new THREE.Fog(
     new THREE.Color(SKY_HORIZON),
     win.sizeMeters * 0.3,
-    win.sizeMeters * 0.72,
+    win.sizeMeters * 0.6,
   )
 }
 

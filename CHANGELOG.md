@@ -1,3 +1,19 @@
+## Horizonte continuo y el doble de distancia en la Vista 3D — 2026-10-20
+
+- Eliminada la **línea vertical amarilla** que bajaba del avión al suelo: la
+  vista queda limpia, como las vistas 3D de referencia.
+- La distancia de visión del suelo **se duplica**: ~160 km en crucero, 80 km
+  en ascenso, 40 km en aproximación y 20 km cerca del suelo (a latitud media,
+  ~120/60/30/15 km).
+- El borde del parche de suelo ya **no se corta contra el cielo**: la textura
+  se funde con el horizonte en su periferia y la niebla completa la
+  transición, desde cualquier ángulo de cámara.
+- El relieve DEM queda **georreferenciado con exactitud** (el bloque de
+  teselas Terrarium cubre la misma ventana que el satélite; antes el relieve
+  aparecía estirado).
+- El suelo se re-centra con menos frecuencia —el umbral crece con el tamaño de
+  la ventana—, así que el crucero descarga menos teselas.
+
 ## Vista 3D sobre el mapa real a pantalla completa — 2026-10-19
 
 - La *Vista 3D* ahora ocupa **toda la pantalla**, como las vistas 3D de
@@ -25,9 +41,8 @@
   tiempo de ejecución a la **longitud real** del avión: escala 1:1 garantizada
   (37,6 m / 66,8 m / 72,7 m / 39,5 m / 56,7 m según familia).
 - El modelo se coloca a su **altitud real sobre el plano del mapa** (en tierra,
-  con las ruedas apoyadas) con línea de referencia al suelo, retícula kilométrica
-  deslizante, marca de norte y HUD con altitud en m/ft, rumbo, velocidad y
-  escala.
+  con las ruedas apoyadas) con retícula kilométrica deslizante, marca de norte
+  y HUD con altitud en m/ft, rumbo, velocidad y escala.
 - **Cámara orbital:** arrastra para orbitar alrededor del avión, rueda para
   acercar, `Esc` para cerrar. El rumbo del modelo sigue el rumbo informado en
   tiempo real.

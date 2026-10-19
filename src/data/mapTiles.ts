@@ -17,6 +17,12 @@ export const MAP_FALLBACK_TEMPLATE = 'https://tile.openstreetmap.org/{z}/{x}/{y}
 /** Terrarium-encoded elevation tiles: height = R*256 + G + B/256 - 32768. */
 export const TERRAIN_TEMPLATE = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
+/**
+ * Sky-horizon tint used to melt the ground patch edge into the sky. Must
+ * match `SKY_HORIZON` in Aircraft3DViewer (rgb of #d4e4f0).
+ */
+const HORIZON_RGB = '212, 228, 240'
+
 export const TILE_PX = 256
 /** Satellite tiles per side of the ground patch. Terrain uses ¼ as many at z+2. */
 export const GROUND_TILES = 8
@@ -53,7 +59,7 @@ export interface GroundPatch {
 /** Terrain heights (meters, row-major; row 0 is the north edge, like the raster). */
 export interface TerrainPatch {
   heights: Float32Array
-  /** Samples per side (512 = 2 terrarium tiles of 256 px at z+2). */
+  /** Samples per side (512 = the window's 8 z-tiles ÷ 4, i.e. one terrarium pixel per 4 sat px at z−2). */
   samples: number
   window: GroundWindow
 }
@@ -63,11 +69,12 @@ export function metersPerPixel(latDeg: number, z: number): number {
   return (EARTH_MERCATOR_RADIUS * Math.cos((latDeg * Math.PI) / 180)) / Math.pow(2, z)
 }
 
-/** Satellite zoom that keeps ~80 km / 40 km / 20 km of ground under the view. */
+/** Satellite zoom that keeps ~160 / 80 / 40 / 20 km of ground under the view. */
 export function tileZoomForAltitude(altitudeM: number): number {
   if (!Number.isFinite(altitudeM) || altitudeM < 800) return 14
   if (altitudeM < 3000) return 13
-  return 12
+  if (altitudeM < 9000) return 12
+  return 11
 }
 
 /** Fractional world tile coordinates of a position at zoom `z`. */
@@ -84,8 +91,8 @@ export function tilePosition(latDeg: number, lonDeg: number, z: number): { fx: n
  * Builds the square tile window centred on a position.
  *
  * The window is aligned to tile boundaries so the satellite raster (8×8 tiles
- * at z) and the terrain raster (2×2 tiles at z+2) describe the exact same
- * piece of the world.
+ * at z) and the terrain raster (a 3×3 block of terrarium tiles at z−2) cover
+ * the exact same piece of the world.
  */
 export function groundWindow(latDeg: number, lonDeg: number, z: number, n = GROUND_TILES): GroundWindow {
   const { fx, fy } = tilePosition(latDeg, lonDeg, z)
@@ -105,9 +112,32 @@ export function groundWindow(latDeg: number, lonDeg: number, z: number, n = GROU
   }
 }
 
-/** Terrain tile block that covers the same world window as `win`. */
-export function terrainTilesOf(win: GroundWindow): { z: number; x0: number; y0: number } {
-  return { z: win.z + 2, x0: win.x0 * 4, y0: win.y0 * 4 }
+/**
+ * Terrain tile block that covers the same world window as `win`.
+ *
+ * One terrarium tile at z−2 equals 4×4 satellite tiles at z, so the 8×8
+ * window needs exactly 512×512 DEM pixels. The window starts on a z-tile
+ * boundary (256 sat px = 64 DEM px), which can straddle up to 3×3 tiles at
+ * z−2; the returned block plus the DEM-pixel offset of the window locates
+ * the exact 512×512 region inside it.
+ */
+export function terrainTilesOf(win: GroundWindow): {
+  z: number
+  x0: number
+  y0: number
+  offsetX: number
+  offsetY: number
+} {
+  const z = win.z - 2
+  const x0 = Math.floor(win.x0 / 4)
+  const y0 = Math.floor(win.y0 / 4)
+  return {
+    z,
+    x0,
+    y0,
+    offsetX: (win.x0 - x0 * 4) * 64,
+    offsetY: (win.y0 - y0 * 4) * 64,
+  }
 }
 
 /** Decodes one Terrarium pixel into meters of elevation. */
@@ -172,12 +202,37 @@ async function compositeTiles(
 }
 
 /**
+ * Blends the outer ring of a ground raster toward the sky-horizon tint, so
+ * the square patch boundary is invisible from any camera angle. The clear
+ * disc covers 34% of the raster radius (68% of the half-window); the tint
+ * is fully opaque exactly at the edge midpoints.
+ */
+function fadeGroundRim(canvas: HTMLCanvasElement): void {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const size = canvas.width
+  const gradient = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    size * 0.34,
+    size / 2,
+    size / 2,
+    size * 0.5,
+  )
+  gradient.addColorStop(0, `rgba(${HORIZON_RGB}, 0)`)
+  gradient.addColorStop(1, `rgba(${HORIZON_RGB}, 1)`)
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, size, size)
+}
+
+/**
  * Fetches the ground raster for a window: satellite imagery first, then an
  * OpenStreetMap map, then the procedural grid (`kind: 'grid'`, no canvas).
  */
 export async function fetchGroundPatch(win: GroundWindow, signal?: AbortSignal): Promise<GroundPatch> {
   const satellite = await compositeTiles(SATELLITE_TEMPLATE, win.z, win.x0, win.y0, win.n, signal)
   if (satellite) {
+    fadeGroundRim(satellite)
     return {
       kind: 'satellite',
       canvas: satellite,
@@ -187,6 +242,7 @@ export async function fetchGroundPatch(win: GroundWindow, signal?: AbortSignal):
   }
   const map = await compositeTiles(MAP_FALLBACK_TEMPLATE, win.z, win.x0, win.y0, win.n, signal)
   if (map) {
+    fadeGroundRim(map)
     return {
       kind: 'map',
       canvas: map,
@@ -202,7 +258,8 @@ export async function fetchGroundPatch(win: GroundWindow, signal?: AbortSignal):
  * Returns null when the DEM cannot be loaded (the ground stays flat).
  */
 export async function fetchTerrainPatch(win: GroundWindow, signal?: AbortSignal): Promise<TerrainPatch | null> {
-  const { z, x0, y0 } = terrainTilesOf(win)
+  const { z, x0, y0, offsetX, offsetY } = terrainTilesOf(win)
+  const block = 3
   const samples = TILE_PX * 2
   const heights = new Float32Array(samples * samples)
   const ctxOf = (img: HTMLImageElement): ImageData | null => {
@@ -218,8 +275,8 @@ export async function fetchTerrainPatch(win: GroundWindow, signal?: AbortSignal)
     }
   }
   const tiles: Array<Promise<ImageData | null>> = []
-  for (let ty = 0; ty < 2; ty++) {
-    for (let tx = 0; tx < 2; tx++) {
+  for (let ty = 0; ty < block; ty++) {
+    for (let tx = 0; tx < block; tx++) {
       tiles.push(
         loadTileImage(tileUrl(TERRAIN_TEMPLATE, z, x0 + tx, y0 + ty), signal).then((img) =>
           img ? ctxOf(img) : null,
@@ -228,19 +285,25 @@ export async function fetchTerrainPatch(win: GroundWindow, signal?: AbortSignal)
     }
   }
   const decoded = await Promise.all(tiles)
-  if (decoded.some((tile) => !tile)) return null
+  // Tiles that do not touch the window may be missing; overlapping ones may not.
+  const overlapsWindow = (index: number): boolean => {
+    const sx = (index % block) * TILE_PX
+    const sy = Math.floor(index / block) * TILE_PX
+    return sx < offsetX + samples && sx + TILE_PX > offsetX && sy < offsetY + samples && sy + TILE_PX > offsetY
+  }
+  if (decoded.some((tile, index) => !tile && overlapsWindow(index))) return null
   decoded.forEach((tile, index) => {
-    const tileX = index % 2
-    const tileY = Math.floor(index / 2)
-    const data = tile!.data
+    if (!tile) return
+    const tileX = index % block
+    const tileY = Math.floor(index / block)
+    const data = tile.data
     for (let py = 0; py < TILE_PX; py++) {
       for (let px = 0; px < TILE_PX; px++) {
+        const sx = tileX * TILE_PX + px
+        const sy = tileY * TILE_PX + py
+        if (sx < offsetX || sx >= offsetX + samples || sy < offsetY || sy >= offsetY + samples) continue
         const i = (py * TILE_PX + px) * 4
-        heights[(tileY * TILE_PX + py) * samples + (tileX * TILE_PX + px)] = decodeTerrariumPixel(
-          data[i],
-          data[i + 1],
-          data[i + 2],
-        )
+        heights[(sy - offsetY) * samples + (sx - offsetX)] = decodeTerrariumPixel(data[i], data[i + 1], data[i + 2])
       }
     }
   })
