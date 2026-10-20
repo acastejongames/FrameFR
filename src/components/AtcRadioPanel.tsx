@@ -153,7 +153,7 @@ export function AtcRadioPanel({
               <option key={channel.value} value={channel.value} label={channel.label} />
             ))}
           </datalist>
-          <small id="radio-frequency-hint">Banda aérea VHF: 118–136.975 MHz. Si el perfil no cubre la frecuencia, el reproductor solicita recentrar el SDR cuando el servidor lo permite.</small>
+          <small id="radio-frequency-hint">Banda aérea VHF: 118–136.975 MHz. El reproductor busca y selecciona automáticamente un perfil SDR que incluya la frecuencia.</small>
         </div>
 
         <div className="radio-channels" aria-label="Frecuencias rápidas de Palma">
@@ -202,7 +202,7 @@ export function AtcRadioPanel({
       )}
 
       <p className="radio-note">
-        En SDR Alaró puedes sintonizar la banda aérea VHF (118–136.975 MHz). Si el perfil activo está en otra banda, se solicita recentrar el SDR cuando OpenWebRX+ lo permite; en un receptor público esto puede afectar la sintonía compartida.
+        SDR Alaró ofrece el perfil SDR-B · Banda Aérea 118–120 MHz. El reproductor lo selecciona automáticamente para frecuencias de ese rango; el cambio de perfil puede modificar la sintonía compartida del receptor.
       </p>
       <div className="radio-links">
         <a href="https://aip.enaire.es/AIP/contenido_AIP/ENR/LE_ENR_2_3_en.html" target="_blank" rel="noopener noreferrer">

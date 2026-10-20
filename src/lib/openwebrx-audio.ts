@@ -14,6 +14,38 @@ export type RadioPlaybackState = {
 
 type StateHandler = (state: RadioPlaybackState) => void
 
+type ReceiverProfile = { id: string; name: string }
+
+function profileRangeHz(name: string): [number, number] | null {
+  const match = name.match(/(\d+(?:[.,]\d+)?)\s*(?:-|–|—|to|a)\s*(\d+(?:[.,]\d+)?)/i)
+  if (!match) return null
+  const first = Number(match[1].replace(',', '.'))
+  const second = Number(match[2].replace(',', '.'))
+  if (!Number.isFinite(first) || !Number.isFinite(second)) return null
+  const scale = Math.max(first, second) < 1000 ? 1_000_000 : 1
+  return [Math.min(first, second) * scale, Math.max(first, second) * scale]
+}
+
+function findProfileForFrequency(profiles: ReceiverProfile[], frequencyHz: number): ReceiverProfile | null {
+  const ranged = profiles
+    .map((profile) => ({ profile, range: profileRangeHz(profile.name) }))
+    .filter((item): item is { profile: ReceiverProfile; range: [number, number] } =>
+      item.range !== null && frequencyHz >= item.range[0] && frequencyHz <= item.range[1],
+    )
+    .sort((first, second) => (first.range[1] - first.range[0]) - (second.range[1] - second.range[0]))
+  if (ranged.length > 0) return ranged[0].profile
+
+  const airbandKeywords = ['airband', 'air band', 'banda aerea', 'aviation', 'aviacion']
+  if (frequencyHz >= 118_000_000 && frequencyHz <= 137_000_000) {
+    const airband = profiles.find((profile) => {
+      const normalized = profile.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      return airbandKeywords.some((keyword) => normalized.includes(keyword))
+    })
+    if (airband) return airband
+  }
+  return null
+}
+
 const INDEX_TABLE = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8]
 const STEP_TABLE = [
   7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
@@ -156,7 +188,11 @@ export class OpenWebRxAudioClient {
   private output: PcmOutput | null = null
   private timeout: number | null = null
   private retuneTimeout: number | null = null
+  private profileTimeout: number | null = null
   private retuneRequested = false
+  private profilesReceived = false
+  private profiles: ReceiverProfile[] = []
+  private selectedProfileId: string | null = null
   private stopped = false
   private terminal = false
   private started = false
@@ -235,6 +271,7 @@ export class OpenWebRxAudioClient {
     this.stopped = true
     this.clearTimeout()
     this.clearRetuneTimeout()
+    this.clearProfileTimeout()
     this.socket?.close()
     this.socket = null
     this.releaseAudio()
@@ -252,6 +289,17 @@ export class OpenWebRxAudioClient {
     if (data.type === 'config' && data.value && typeof data.value === 'object') {
       this.config = { ...this.config, ...(data.value as Record<string, unknown>) }
       this.configureDemodulator()
+    } else if (data.type === 'profiles' && Array.isArray(data.value)) {
+      this.profiles = data.value.flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const profile = item as { id?: unknown; name?: unknown }
+        return typeof profile.id === 'string' && typeof profile.name === 'string'
+          ? [{ id: profile.id, name: profile.name }]
+          : []
+      })
+      this.profilesReceived = true
+      this.clearProfileTimeout()
+      this.configureDemodulator()
     } else if (data.type === 'sdr_error') {
       this.fail('unavailable', String(data.value || 'El receptor SDR no está disponible.'))
     } else if (data.type === 'backoff') {
@@ -268,33 +316,58 @@ export class OpenWebRxAudioClient {
     const minimum = center - bandwidth / 2
     const maximum = center + bandwidth / 2
     if (this.frequencyHz < minimum || this.frequencyHz > maximum) {
-      if (this.config.allow_center_freq_changes === true) {
-        if (!this.retuneRequested) {
-          this.retuneRequested = true
-          this.emit('tuning', 'Solicitando recentrar el SDR en ' + formatMHz(this.frequencyHz) + ' MHz…')
-          this.socket.send(JSON.stringify({
-            type: 'setfrequency',
-            params: { frequency: this.frequencyHz },
-          }))
-          this.retuneTimeout = window.setTimeout(() => {
-            this.fail(
-              'out-of-band',
-              'OpenWebRX+ no recentró el SDR. El servidor puede bloquear este cambio o requerir una clave.',
-            )
+      if (this.selectedProfileId) return
+      if (!this.profilesReceived) {
+        if (this.profileTimeout === null) {
+          this.emit('tuning', 'Buscando un perfil SDR que incluya ' + formatMHz(this.frequencyHz) + ' MHz…')
+          this.profileTimeout = window.setTimeout(() => {
+            this.fail('unavailable', 'OpenWebRX+ no envió la lista de perfiles disponibles.')
           }, 10000)
         }
+        return
+      }
+
+      const matchingProfile = findProfileForFrequency(this.profiles, this.frequencyHz)
+      const activeProfileId = String(this.config.sdr_id || '') + '|' + String(this.config.profile_id || '')
+      if (matchingProfile && matchingProfile.id !== activeProfileId) {
+        this.selectedProfileId = matchingProfile.id
+        this.emit('tuning', 'Seleccionando perfil ' + matchingProfile.name + '…')
+        this.socket.send(JSON.stringify({
+          type: 'selectprofile',
+          params: { profile: matchingProfile.id },
+        }))
+        this.profileTimeout = window.setTimeout(() => {
+          this.fail(
+            'unavailable',
+            'OpenWebRX+ no activó el perfil ' + matchingProfile.name + '.',
+          )
+        }, 12000)
+        return
+      }
+
+      if (this.config.allow_center_freq_changes === true && !this.retuneRequested) {
+        this.retuneRequested = true
+        this.emit('tuning', 'Solicitando recentrar el SDR en ' + formatMHz(this.frequencyHz) + ' MHz…')
+        this.socket.send(JSON.stringify({
+          type: 'setfrequency',
+          params: { frequency: this.frequencyHz },
+        }))
+        this.retuneTimeout = window.setTimeout(() => {
+          this.fail('out-of-band', 'OpenWebRX+ no aplicó el recentrado solicitado.')
+        }, 10000)
       } else {
         this.fail(
           'out-of-band',
-          'El perfil activo cubre ' + formatMHz(minimum) + '–' + formatMHz(maximum) +
-            ' MHz y el servidor no permite recentrar desde el reproductor.',
+          'No se encontró un perfil anunciado que cubra ' + formatMHz(this.frequencyHz) + ' MHz.',
         )
       }
       return
     }
 
     this.clearRetuneTimeout()
+    this.clearProfileTimeout()
     this.retuneRequested = false
+    this.selectedProfileId = null
     this.compression = this.config.audio_compression === 'adpcm' ? 'adpcm' : 'none'
     this.socket.send(JSON.stringify({
       type: 'dspcontrol',
@@ -345,6 +418,7 @@ export class OpenWebRxAudioClient {
     this.terminal = true
     this.clearTimeout()
     this.clearRetuneTimeout()
+    this.clearProfileTimeout()
     this.releaseAudio()
     this.onState({ phase, message })
     this.socket?.close()
@@ -369,6 +443,13 @@ export class OpenWebRxAudioClient {
     if (this.retuneTimeout !== null) {
       window.clearTimeout(this.retuneTimeout)
       this.retuneTimeout = null
+    }
+  }
+
+  private clearProfileTimeout(): void {
+    if (this.profileTimeout !== null) {
+      window.clearTimeout(this.profileTimeout)
+      this.profileTimeout = null
     }
   }
 
