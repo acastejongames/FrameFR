@@ -11,9 +11,17 @@ import {
   modelScaleFor,
 } from '../src/data/aircraft3d'
 import {
+  DETAIL_TILES,
+  DETAIL_ZOOM_JUMP,
   decodeTerrariumPixel,
+  detailWindow,
   groundWindow,
   metersPerPixel,
+  farWindow,
+  FAR_TILES,
+  horizonMeters,
+  parentCover,
+  underlayFor,
   terrainTilesOf,
   tilePosition,
   tileUrl,
@@ -576,6 +584,64 @@ console.log('· Teselas del terreno del visor 3D…')
     'teselas: el DEM de ×5 cubre su ventana',
   )
   check(viewWindow(40, -3.5, 11_000, 9).n === 10, 'teselas: la distancia se recorta en 5')
+  const detail = detailWindow(40, -3.5, 11)
+  check(
+    detail.z === 11 + DETAIL_ZOOM_JUMP && detail.n === DETAIL_TILES,
+    'teselas: el parche de detalle sube de zoom',
+  )
+  const wide = groundWindow(40, -3.5, 11)
+  check(
+    Math.abs(detail.sizeMeters * 4 - wide.sizeMeters) < 1,
+    'teselas: el parche de detalle cubre un cuarto del lado del amplio',
+  )
+  const inside =
+    detail.x0 >= wide.x0 * 4 &&
+    detail.x0 + detail.n <= (wide.x0 + wide.n) * 4 &&
+    detail.y0 >= wide.y0 * 4 &&
+    detail.y0 + detail.n <= (wide.y0 + wide.n) * 4
+  check(inside, 'teselas: el parche de detalle cae dentro del amplio')
+  const cover = parentCover(wide)
+  check(
+    cover.z === wide.z - 4 &&
+      cover.scale === 16 &&
+      cover.x0 * cover.scale <= wide.x0 &&
+      (cover.x0 + cover.nx) * cover.scale >= wide.x0 + wide.n &&
+      cover.y0 * cover.scale <= wide.y0 &&
+      (cover.y0 + cover.ny) * cover.scale >= wide.y0 + wide.n,
+    'teselas: la capa base de bajo zoom cubre toda la ventana',
+  )
+  check(
+    cover.nx >= 1 && cover.ny >= 1 && cover.nx * cover.ny <= 4,
+    'teselas: la capa base son como mucho cuatro peticiones',
+  )
+  const fakeCanvas = { width: wide.n * 256 } as unknown as HTMLCanvasElement
+  const underlay = underlayFor(wide, fakeCanvas, detail)
+  check(
+    Boolean(underlay) &&
+      Math.abs((underlay?.sw ?? 0) - 512) < 1e-6 &&
+      (underlay?.sx ?? -1) >= 0 &&
+      (underlay?.sx ?? 0) + (underlay?.sw ?? 0) <= wide.n * 256 + 0.5,
+    'teselas: el parche de detalle reutiliza el amplio como capa base',
+  )
+  const outside = underlayFor(wide, fakeCanvas, groundWindow(50, 30, 13))
+  check(outside === null, 'teselas: una ventana ajena no se usa como capa base')
+  const horizon = horizonMeters(11_000)
+  check(
+    Math.abs(horizon - Math.sqrt(2 * 6_371_000 * 11_000)) < 0.001 && horizon > 370_000,
+    'teselas: el horizonte a 11 km ronda los 375 km',
+  )
+  check(horizonMeters(0) === 0 && horizonMeters(Number.NaN) === 0, 'teselas: sin altitud no hay horizonte')
+  const far = farWindow(40, -3.5, 122, 20_000)
+  check(
+    far.sizeMeters >= 1.6 * horizonMeters(122) && far.n === FAR_TILES,
+    'teselas: el terreno lejano alcanza el horizonte a baja altitud',
+  )
+  const farCruise = farWindow(40, -3.5, 11_000, win.sizeMeters * 2.5)
+  check(
+    farCruise.sizeMeters >= 2.5 * win.sizeMeters && farCruise.sizeMeters >= 1.6 * horizon,
+    'teselas: el terreno lejano también cubre la vista en crucero',
+  )
+  check(farCruise.z < win.z, 'teselas: el terreno lejano usa menos zoom que el detallado')
   const demHalf = terrainTilesOf(win, 2)
   check(
     demHalf.samples === 256 && demHalf.stride === 2 && demHalf.blockX * 256 >= demHalf.offsetX + 512,

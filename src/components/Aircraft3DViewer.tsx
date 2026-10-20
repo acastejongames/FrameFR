@@ -20,7 +20,6 @@ import {
   RENDER_RESOLUTIONS,
   RESOLUTION_LABELS,
   TERRAIN_STRIDE,
-  TEXTURE_ANISOTROPY,
   isPerformanceSettings,
   normalizePerformance,
   viewerPixelRatio,
@@ -29,6 +28,10 @@ import {
   type RenderResolution,
 } from '@/data/quality'
 import {
+  detailWindow,
+  farWindow,
+  fetchFarPatch,
+  fetchGroundDetail,
   fetchGroundPatch,
   fetchTerrainPatch,
   VIEW_DISTANCES,
@@ -67,6 +70,16 @@ interface SceneState {
   pivot: THREE.Group
   groundGroup: THREE.Group
   groundObject: THREE.Object3D | null
+  /** Sharp patch drawn on top of the wide one. */
+  detailObject: THREE.Object3D | null
+  detailWindow: GroundWindow | null
+  detailToken: number
+  /** Low zoom backdrop that reaches the horizon. */
+  farObject: THREE.Object3D | null
+  farWindow: GroundWindow | null
+  farToken: number
+  farFetching: boolean
+  farSizeMeters: number
   scaledHeightM: number
   raf: number
   disposed: boolean
@@ -230,6 +243,14 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         pivot,
         groundGroup,
         groundObject: null,
+        detailObject: null,
+        detailWindow: null,
+        detailToken: 0,
+        farObject: null,
+        farWindow: null,
+        farToken: 0,
+        farFetching: false,
+        farSizeMeters: 0,
         scaledHeightM: model.realLengthM * 0.3,
         raf: 0,
         disposed: false,
@@ -279,6 +300,15 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
             groundVertices:
               (state?.groundObject as THREE.Mesh | null)?.geometry?.getAttribute('position')
                 ?.count ?? 0,
+            detail: Boolean(state?.detailObject),
+            detailVertices:
+              (state?.detailObject as THREE.Mesh | null)?.geometry?.getAttribute('position')
+                ?.count ?? 0,
+            far: Boolean(state?.farObject),
+            farWindow: state?.farWindow
+              ? { z: state.farWindow.z, size: Math.round(state.farWindow.sizeMeters) }
+              : null,
+            farFetching: state?.farFetching ?? null,
             quality: state
               ? {
                   mesh: state.quality.mesh,
@@ -537,6 +567,8 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         state.modelDispose?.()
         state.modelObject = null
         state.modelDispose = null
+        dropDetail(state)
+        if (state.farObject) disposeObject3D(state.farObject)
         if (state.groundObject) disposeObject3D(state.groundObject)
         if (state.scene.background instanceof THREE.Texture) state.scene.background.dispose()
         state.renderer.dispose()
@@ -912,6 +944,7 @@ function requestGround(
     state.range !== range ||
     state.groundKey !== qualityKey ||
     drift > driftLimit
+  requestFarGround(state, position, win)
   if (!needs || state.fetching) return
   state.fetching = true
   state.range = range
@@ -930,6 +963,7 @@ function requestGround(
       setAttribution(
         patch.attribution ? `${patch.attribution}${terrain ? ' · Elevación: Mapzen/AWS' : ''}` : '',
       )
+      requestDetail(state, position, terrain, patch)
     })
     .catch(() => {
       if (state.disposed || token !== state.fetchToken) return
@@ -937,6 +971,204 @@ function requestGround(
       // Retry on the next heartbeat (a quality change may be waiting).
       state.groundKey = ''
       setGroundLoading(false)
+    })
+}
+
+/** Ground plane for a window, with the DEM relief sampled over a UV sub-rect. */
+function groundGeometry(
+  win: GroundWindow,
+  terrain: TerrainPatch | null,
+  span: number,
+  uv: { u0: number; v0: number; du: number; dv: number } = { u0: 0, v0: 0, du: 1, dv: 1 },
+): THREE.PlaneGeometry {
+  const geometry = new THREE.PlaneGeometry(win.sizeMeters, win.sizeMeters, span, span)
+  const positions = geometry.attributes.position as THREE.BufferAttribute
+  for (let j = 0; j <= span; j++) {
+    for (let i = 0; i <= span; i++) {
+      const height = terrain
+        ? sampleHeight(terrain, uv.u0 + (i / span) * uv.du, uv.v0 + (j / span) * uv.dv)
+        : 0
+      positions.setZ(j * (span + 1) + i, height)
+    }
+  }
+  positions.needsUpdate = true
+  geometry.computeVertexNormals()
+  geometry.rotateX(-Math.PI / 2)
+  return geometry
+}
+
+/**
+ * Material of a ground raster.
+ *
+ * The satellite image already carries its own lighting, so it is drawn
+ * unlit: re-lighting it washed the colours out and made the terrain look
+ * muddy. Relief still reads through the silhouette and the imagery itself.
+ * The sharp detail patch is transparent at its feathered rim and never
+ * writes depth, so it blends into the wide patch underneath.
+ */
+function groundMaterial(
+  state: SceneState,
+  canvas: HTMLCanvasElement,
+  detail = false,
+): THREE.MeshBasicMaterial {
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = state.renderer.capabilities.getMaxAnisotropy()
+  texture.minFilter = THREE.LinearMipmapLinearFilter
+  texture.magFilter = THREE.LinearFilter
+  texture.generateMipmaps = true
+  return new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: detail,
+    depthWrite: !detail,
+    fog: true,
+  })
+}
+
+/** Removes the sharp patch (the wide one no longer matches it). */
+function dropDetail(state: SceneState): void {
+  state.detailToken += 1
+  if (!state.detailObject) return
+  state.groundGroup.remove(state.detailObject)
+  disposeObject3D(state.detailObject)
+  state.detailObject = null
+  state.detailWindow = null
+}
+
+/**
+ * Streams the sharp patch of the area around the plane on top of the wide
+ * one. It is requested after the wide patch is already on screen, so the
+ * viewer never waits for it and the ground refines itself in place.
+ */
+function requestDetail(
+  state: SceneState,
+  position: { lat: number; lon: number },
+  terrain: TerrainPatch | null,
+  patch: GroundPatch,
+): void {
+  const base = state.patchWindow
+  if (!patch.canvas || !base || state.quality.textures !== 'alta') return
+  const win = detailWindow(position.lat, position.lon, base.z)
+  const canvas = patch.canvas
+  const token = ++state.detailToken
+  void fetchGroundDetail(
+    win,
+    base,
+    canvas,
+    state.abort.signal,
+    GROUND_TILE_PX[state.quality.textures],
+  )
+    .then((detail) => {
+      if (state.disposed || token !== state.detailToken) return
+      if (state.patchWindow !== base || !detail) return
+      applyDetail(state, detail, win, terrain, base)
+    })
+    .catch(() => undefined)
+}
+
+/** Installs the sharp patch: same terrain, sharper imagery, feathered rim. */
+function applyDetail(
+  state: SceneState,
+  canvas: HTMLCanvasElement,
+  win: GroundWindow,
+  terrain: TerrainPatch | null,
+  base: GroundWindow,
+): void {
+  dropDetail(state)
+  const jump = win.z - base.z
+  const span = 1 << jump
+  const u0 = (win.x0 / span - base.x0) / base.n
+  const v0 = (win.y0 / span - base.y0) / base.n
+  const size = win.n / span / base.n
+  const segments = Math.max(32, Math.round(MESH_SEGMENTS[state.quality.mesh] / 2))
+  const geometry = groundGeometry(win, terrain, segments, { u0, v0, du: size, dv: size })
+  const mesh = new THREE.Mesh(geometry, groundMaterial(state, canvas, true))
+  mesh.renderOrder = 2
+  // Relative to the wide patch centre: `groundGroup` already carries the
+  // patch position and the drift, and this mesh is a child of it.
+  mesh.position.set(
+    win.offsetEastM - base.offsetEastM,
+    1.5,
+    -(win.offsetNorthM - base.offsetNorthM),
+  )
+  state.groundGroup.add(mesh)
+  state.detailObject = mesh
+  state.detailWindow = win
+}
+
+/**
+ * Keeps a low zoom backdrop under the sharp patch that reaches the horizon.
+ *
+ * Without it the terrain ends inside the view at low altitude (the sky shows
+ * under the plane). It is only re-fetched when the plane leaves the middle of
+ * the current far window, so it costs ~16 requests per hundreds of km.
+ */
+function requestFarGround(
+  state: SceneState,
+  position: { lat: number; lon: number; altM: number; onGround: boolean },
+  base: GroundWindow,
+): void {
+  const altitudeM = position.onGround ? 0 : position.altM
+  const win = farWindow(position.lat, position.lon, altitudeM, base.sizeMeters * 2.5)
+  const current = state.farWindow
+  const drift = current
+    ? Math.hypot(
+        (position.lat - state.anchorLat) * EARTH_M_PER_DEG,
+        (position.lon - state.anchorLon) *
+          EARTH_M_PER_DEG *
+          Math.cos((state.anchorLat * Math.PI) / 180),
+      )
+    : Number.POSITIVE_INFINITY
+  const stale =
+    !current ||
+    current.z !== win.z ||
+    current.x0 !== win.x0 ||
+    current.y0 !== win.y0 ||
+    drift > win.sizeMeters * 0.18
+  if (!stale || state.farFetching) return
+  state.farFetching = true
+  const token = ++state.farToken
+  void fetchFarPatch(win, state.abort.signal)
+    .then((patch) => {
+      if (state.disposed || token !== state.farToken) return
+      state.farFetching = false
+      if (!patch.canvas) return
+      if (state.farObject) {
+        state.groundGroup.remove(state.farObject)
+        disposeObject3D(state.farObject)
+      }
+      const geometry = new THREE.PlaneGeometry(win.sizeMeters, win.sizeMeters, 1, 1)
+      geometry.rotateX(-Math.PI / 2)
+      const mesh = new THREE.Mesh(geometry, groundMaterial(state, patch.canvas))
+      mesh.renderOrder = 0
+      // Under everything: the sharp patch always wins where they overlap.
+      mesh.position.set(
+        win.offsetEastM - base.offsetEastM,
+        -2,
+        -(win.offsetNorthM - base.offsetNorthM),
+      )
+      state.groundGroup.add(mesh)
+      state.farObject = mesh
+      state.farWindow = win
+      state.farSizeMeters = win.sizeMeters
+      // The haze now belongs to the far ground: rebuild it for the wider view.
+      if (state.patchWindow) {
+        state.scene.fog = new THREE.Fog(
+          new THREE.Color(SKY_HORIZON),
+          Math.max(state.patchWindow.sizeMeters * 0.5, win.sizeMeters * 0.16),
+          Math.max(state.patchWindow.sizeMeters * 0.75, win.sizeMeters * 0.44),
+        )
+        state.camera.far = Math.max(
+          200_000,
+          win.sizeMeters * 0.8,
+          state.patchWindow.sizeMeters * 1.1,
+        )
+        state.camera.updateProjectionMatrix()
+      }
+    })
+    .catch(() => {
+      if (state.disposed || token !== state.farToken) return
+      state.farFetching = false
     })
 }
 
@@ -968,48 +1200,40 @@ function applyPatch(
     state.groundObject = null
   }
 
+  // The wide patch changes as a whole: the previous sharp patch no longer
+  // matches the new anchor.
+  dropDetail(state)
+
   if (patch.canvas) {
-    const span = MESH_SEGMENTS[state.quality.mesh]
-    const geometry = new THREE.PlaneGeometry(win.sizeMeters, win.sizeMeters, span, span)
-    const positions = geometry.attributes.position as THREE.BufferAttribute
-    for (let j = 0; j <= span; j++) {
-      for (let i = 0; i <= span; i++) {
-        const height = terrain ? sampleHeight(terrain, i / span, j / span) : 0
-        positions.setZ(j * (span + 1) + i, height)
-      }
-    }
-    positions.needsUpdate = true
-    geometry.computeVertexNormals()
-    geometry.rotateX(-Math.PI / 2)
-    const texture = new THREE.CanvasTexture(patch.canvas)
-    texture.colorSpace = THREE.SRGBColorSpace
-    texture.anisotropy = Math.min(
-      TEXTURE_ANISOTROPY[state.quality.textures],
-      state.renderer.capabilities.getMaxAnisotropy(),
-    )
-    // Lambert is much cheaper per fragment on mobile GPUs and the terrain is
-    // a flat-lit satellite image anyway.
-    const material =
-      state.quality.textures === 'baja'
-        ? new THREE.MeshLambertMaterial({ map: texture })
-        : new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95, metalness: 0 })
+    const geometry = groundGeometry(win, terrain, MESH_SEGMENTS[state.quality.mesh])
+    const material = groundMaterial(state, patch.canvas)
     state.groundObject = new THREE.Mesh(geometry, material)
   } else {
     state.groundObject = new THREE.GridHelper(win.sizeMeters, 40, 0x2f3d4d, 0x1b232d)
   }
   state.groundGroup.add(state.groundObject)
   state.patchWindow = win
+  state.farToken += 1
+  state.farFetching = false
+  if (state.farObject) {
+    state.groundGroup.remove(state.farObject)
+    disposeObject3D(state.farObject)
+    state.farObject = null
+    state.farWindow = null
+  }
   state.terrain = terrain
   state.anchorLat = position.lat
   state.anchorLon = position.lon
   // Far plane always reaches the faded patch rim (needed at distance ×5).
   state.camera.far = Math.max(200_000, win.sizeMeters * 1.1)
   state.camera.updateProjectionMatrix()
+  const farSize = state.farSizeMeters
   state.scene.fog = new THREE.Fog(
     new THREE.Color(SKY_HORIZON),
-    win.sizeMeters * 0.3,
-    win.sizeMeters * 0.6,
+    Math.max(win.sizeMeters * 0.5, farSize * 0.16),
+    Math.max(win.sizeMeters * 0.75, farSize * 0.44),
   )
+  state.camera.far = Math.max(200_000, farSize * 0.8, win.sizeMeters * 1.1)
 }
 
 /** Bilinear terrain sample at plane UV coordinates (row 0 = north edge). */

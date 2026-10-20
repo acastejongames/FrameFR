@@ -128,7 +128,11 @@ completa con:
   de suelo alcanza ~160 km de visión en crucero (menos según baja la altitud),
   ampliable hasta **×5 con la distancia de renderizado** del propio visor; su
   borde se funde con el cielo en el horizonte y se re-centra según el avión
-  avanza y su altitud. El botón **Calidad** del propio visor permite cambiar
+  avanza y su altitud. Sobre ese terreno amplio se dibuja un **parche de
+  detalle** dos niveles de zoom más cerca (con el borde difuminado) y debajo
+  una **capa lejana que llega al horizonte real**, así que el suelo nunca
+  termina dentro del encuadre ni deja huecos aunque el servidor de teselas
+  limite peticiones. El botón **Calidad** del propio visor permite cambiar
   al vuelo la malla, las texturas y la resolución de renderizado sin mover la
   cámara.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
@@ -265,7 +269,10 @@ interfaz necesitan cambios.
   en lugar de hasta 3× en móviles). Ningún ajuste desactiva funciones.
 - Las teselas del terreno se guardan en una **caché LRU de 192 imágenes**:
   al re-centrar la ventana se reutiliza la mayoría y solo se descargan las
-  nuevas; una tesela que no responde en 8 s no bloquea el parche.
+  nuevas; una tesela que no responde en 8 s no bloquea el parche. Las
+  peticiones se limitan a 8 en paralelo, se reintentan dos veces y siempre
+  se pinta antes una capa de bajo zoom, de modo que un servidor que limita
+  peticiones produce una imagen suave, nunca agujeros negros.
 - El relieve DEM se decodifica con muestreo reducido en las calidades media y
   baja (4× menos píxeles) y el visor suspende render y descargas con la
   pestaña oculta.

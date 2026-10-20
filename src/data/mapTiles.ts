@@ -36,6 +36,23 @@ export const TILE_TIMEOUT_MS = 8_000
  */
 export const TILE_CACHE_LIMIT = 192
 
+/** Tiles fetched at the same time (public tile servers throttle bursts). */
+export const TILE_CONCURRENCY = 8
+/** Extra attempts per tile before falling back to the lower zoom cover. */
+export const TILE_RETRIES = 2
+/** Zoom levels between the wide patch and the low zoom cover painted first. */
+export const PARENT_ZOOM_DROP = 4
+/** Tiles per side of the sharp patch drawn over the wide one. */
+export const DETAIL_TILES = 8
+/** Zoom levels the detail patch gains over the wide patch. */
+export const DETAIL_ZOOM_JUMP = 2
+/** Neutral ground tone visible only if every tile of a region fails. */
+const GROUND_FALLBACK_RGB = '#5b6a63'
+/** Tiles per side of the far ground that reaches the horizon. */
+export const FAR_TILES = 6
+/** Earth radius used for the horizon distance, meters. */
+const EARTH_RADIUS_M = 6_371_000
+
 /** Render-distance multipliers offered by the 3D viewer (1 = default, 5 = max). */
 export const VIEW_DISTANCES = [1, 2, 3, 4, 5] as const
 export type ViewDistance = (typeof VIEW_DISTANCES)[number]
@@ -230,12 +247,39 @@ export function clearTileCache(): void {
   tileCache.clear()
 }
 
-function loadTileImage(url: string, signal?: AbortSignal): Promise<HTMLImageElement | null> {
-  const cached = tileCache.get(url)
-  if (cached) {
-    rememberTile(url, cached)
-    return Promise.resolve(cached)
+/* ------------------------------------------------------- request limiter */
+/* Browsers cap the number of connections per host anyway, but queuing the
+   tiles ourselves avoids the burst of 64 requests that public tile servers
+   answer with rate-limit errors. Failed tiles are retried a couple of times
+   and, if they still fail, the lower zoom underlay keeps the ground whole. */
+
+let activeTiles = 0
+const tileQueue: Array<() => void> = []
+
+function acquireSlot(): Promise<void> {
+  if (activeTiles < TILE_CONCURRENCY) {
+    activeTiles += 1
+    return Promise.resolve()
   }
+  return new Promise<void>((resolve) => {
+    tileQueue.push(() => {
+      activeTiles += 1
+      resolve()
+    })
+  })
+}
+
+function releaseSlot(): void {
+  activeTiles = Math.max(0, activeTiles - 1)
+  const next = tileQueue.shift()
+  if (next) next()
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function loadTileOnce(url: string, signal?: AbortSignal): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     if (signal?.aborted) {
       resolve(null)
@@ -251,7 +295,6 @@ function loadTileImage(url: string, signal?: AbortSignal): Promise<HTMLImageElem
       if (timer !== undefined) clearTimeout(timer)
       img.onload = null
       img.onerror = null
-      if (value) rememberTile(url, value)
       resolve(value)
     }
     img.onload = () => settle(signal?.aborted ? null : img)
@@ -273,6 +316,36 @@ function loadTileImage(url: string, signal?: AbortSignal): Promise<HTMLImageElem
   })
 }
 
+async function loadTileImage(url: string, signal?: AbortSignal): Promise<HTMLImageElement | null> {
+  const cached = tileCache.get(url)
+  if (cached) {
+    rememberTile(url, cached)
+    return cached
+  }
+  for (let attempt = 0; attempt <= TILE_RETRIES; attempt += 1) {
+    if (signal?.aborted) return null
+    await acquireSlot()
+    const image = await loadTileOnce(url, signal)
+    releaseSlot()
+    if (image) {
+      rememberTile(url, image)
+      return image
+    }
+    if (signal?.aborted) return null
+    if (attempt < TILE_RETRIES) await delay(220 * (attempt + 1))
+  }
+  return null
+}
+
+/** A raster already on screen that can fill the holes of a sharper one. */
+export interface Underlay {
+  canvas: HTMLCanvasElement
+  sx: number
+  sy: number
+  sw: number
+  sh: number
+}
+
 async function compositeTiles(
   template: string,
   z: number,
@@ -281,28 +354,51 @@ async function compositeTiles(
   n: number,
   signal?: AbortSignal,
   tilePx = TILE_PX,
+  underlay?: Underlay | null,
 ): Promise<HTMLCanvasElement | null> {
+  const size = n * tilePx
   const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = n * tilePx
+  canvas.width = canvas.height = size
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
   // Smoother downscales on the low texture tiers.
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
-  const jobs: Array<Promise<boolean>> = []
+  // A neutral ground tone under everything: a tile that never arrives must
+  // never leave a black hole in the middle of the terrain.
+  ctx.fillStyle = GROUND_FALLBACK_RGB
+  ctx.fillRect(0, 0, size, size)
+  if (underlay) {
+    ctx.drawImage(
+      underlay.canvas,
+      underlay.sx,
+      underlay.sy,
+      underlay.sw,
+      underlay.sh,
+      0,
+      0,
+      size,
+      size,
+    )
+  }
+  let loaded = 0
+  const jobs: Array<Promise<void>> = []
   for (let ty = 0; ty < n; ty++) {
     for (let tx = 0; tx < n; tx++) {
       jobs.push(
         loadTileImage(tileUrl(template, z, x0 + tx, y0 + ty), signal).then((img) => {
-          if (img) ctx.drawImage(img, tx * tilePx, ty * tilePx, tilePx, tilePx)
-          return Boolean(img)
+          if (!img) return
+          ctx.drawImage(img, tx * tilePx, ty * tilePx, tilePx, tilePx)
+          loaded += 1
         }),
       )
     }
   }
-  const results = await Promise.all(jobs)
-  // A patch with more than half its tiles missing is useless.
-  return results.filter(Boolean).length >= n * n * 0.5 ? canvas : null
+  await Promise.all(jobs)
+  if (loaded === 0 && !underlay) return null
+  // Even with a couple of missing tiles the patch is useful: the underlay
+  // shows through and the ground stays continuous.
+  return canvas
 }
 
 /**
@@ -318,26 +414,157 @@ function fadeGroundRim(canvas: HTMLCanvasElement): void {
   const gradient = ctx.createRadialGradient(
     size / 2,
     size / 2,
-    size * 0.34,
+    size * 0.4,
     size / 2,
     size / 2,
     size * 0.5,
   )
   gradient.addColorStop(0, `rgba(${HORIZON_RGB}, 0)`)
-  gradient.addColorStop(1, `rgba(${HORIZON_RGB}, 1)`)
+  // Soft aerial-perspective feather: the far ground underneath stays visible,
+  // so the rim reads as distance haze rather than a painted border.
+  gradient.addColorStop(1, `rgba(${HORIZON_RGB}, 0.6)`)
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, size, size)
 }
 
 /**
+ * Erases the outer ring of the detail patch so it dissolves into the wide
+ * ground underneath instead of ending on a visible square seam.
+ */
+function fadeDetailRim(canvas: HTMLCanvasElement): void {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const size = canvas.width
+  const gradient = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    size * 0.3,
+    size / 2,
+    size / 2,
+    size * 0.5,
+  )
+  gradient.addColorStop(0, 'rgba(0, 0, 0, 0)')
+  gradient.addColorStop(0.55, 'rgba(0, 0, 0, 0.25)')
+  gradient.addColorStop(1, 'rgba(0, 0, 0, 1)')
+  ctx.save()
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, size, size)
+  ctx.restore()
+}
+
+/**
+ * Window (and crop) of the lower zoom tiles that cover a ground window.
+ *
+ * One tile `PARENT_ZOOM_DROP` levels below the window covers `2^drop` tiles of
+ * it, so two or three requests are enough to paint the whole patch first.
+ */
+export function parentCover(
+  win: GroundWindow,
+  drop = PARENT_ZOOM_DROP,
+): { z: number; x0: number; y0: number; nx: number; ny: number; scale: number } {
+  const z = Math.max(0, win.z - drop)
+  const scale = 1 << (win.z - z)
+  const x0 = Math.floor(win.x0 / scale)
+  const y0 = Math.floor(win.y0 / scale)
+  const nx = Math.max(1, Math.ceil((win.x0 + win.n) / scale) - x0)
+  const ny = Math.max(1, Math.ceil((win.y0 + win.n) / scale) - y0)
+  return { z, x0, y0, nx, ny, scale }
+}
+
+/** Crop of `baseCanvas` that covers `target` (must be inside the base window). */
+export function underlayFor(
+  base: GroundWindow,
+  baseCanvas: HTMLCanvasElement,
+  target: GroundWindow,
+): Underlay | null {
+  const jump = target.z - base.z
+  if (jump < 0) return null
+  const span = 1 << jump
+  const pxPerBaseTile = baseCanvas.width / base.n
+  const sx = (target.x0 / span - base.x0) * pxPerBaseTile
+  const sy = (target.y0 / span - base.y0) * pxPerBaseTile
+  const sw = (target.n / span) * pxPerBaseTile
+  const sh = sw
+  if (sx < 0 || sy < 0 || sx + sw > baseCanvas.width + 0.5 || sy + sh > baseCanvas.height + 0.5) {
+    return null
+  }
+  return { canvas: baseCanvas, sx, sy, sw, sh }
+}
+
+/**
+ * Far ground: the low zoom raster that reaches the horizon, drawn under the
+ * sharp patch. Its rim is faded to the sky tone, so the terrain melts into the
+ * horizon instead of ending on a hard edge.
+ */
+export async function fetchFarPatch(
+  win: GroundWindow,
+  signal?: AbortSignal,
+): Promise<GroundPatch> {
+  const canvas = await compositeTiles(
+    SATELLITE_TEMPLATE,
+    win.z,
+    win.x0,
+    win.y0,
+    win.n,
+    signal,
+    TILE_PX,
+  )
+  if (!canvas) return { kind: 'grid', canvas: null, window: win, attribution: '' }
+  // No rim tint here on purpose: the far ground is big enough that the fog
+  // reaches full opacity before its edge, and a painted rim would show up as
+  // a pale band where it meets the sharp patch.
+  return {
+    kind: 'satellite',
+    canvas,
+    window: win,
+    attribution: 'Imágenes satelitales: Esri, Maxar, Earthstar Geographics',
+  }
+}
+
+/**
+ * Low zoom raster covering the whole window, painted before the sharp tiles
+ * so the ground is never empty (or black) while they stream in.
+ */
+async function fetchCover(
+  win: GroundWindow,
+  signal: AbortSignal | undefined,
+): Promise<Underlay | null> {
+  const cover = parentCover(win)
+  const canvas = await compositeTiles(
+    SATELLITE_TEMPLATE,
+    cover.z,
+    cover.x0,
+    cover.y0,
+    Math.max(cover.nx, cover.ny),
+    signal,
+    TILE_PX,
+  )
+  if (!canvas) return null
+  const pxPerBaseTile = TILE_PX / cover.scale
+  return {
+    canvas,
+    sx: (win.x0 - cover.x0 * cover.scale) * pxPerBaseTile,
+    sy: (win.y0 - cover.y0 * cover.scale) * pxPerBaseTile,
+    sw: win.n * pxPerBaseTile,
+    sh: win.n * pxPerBaseTile,
+  }
+}
+
+/**
  * Fetches the ground raster for a window: satellite imagery first, then an
  * OpenStreetMap map, then the procedural grid (`kind: 'grid'`, no canvas).
+ *
+ * The low zoom cover is always painted first, and the sharp tiles are drawn
+ * over it as they arrive, so a slow or throttled tile server degrades the
+ * patch to a soft image instead of punching holes in the terrain.
  */
 export async function fetchGroundPatch(
   win: GroundWindow,
   signal?: AbortSignal,
   tilePx = TILE_PX,
 ): Promise<GroundPatch> {
+  const cover = await fetchCover(win, signal)
   const satellite = await compositeTiles(
     SATELLITE_TEMPLATE,
     win.z,
@@ -346,6 +573,7 @@ export async function fetchGroundPatch(
     win.n,
     signal,
     tilePx,
+    cover,
   )
   if (satellite) {
     fadeGroundRim(satellite)
@@ -364,6 +592,7 @@ export async function fetchGroundPatch(
     win.n,
     signal,
     tilePx,
+    cover,
   )
   if (map) {
     fadeGroundRim(map)
@@ -375,6 +604,77 @@ export async function fetchGroundPatch(
     }
   }
   return { kind: 'grid', canvas: null, window: win, attribution: '' }
+}
+
+/**
+ * Distance to the visible horizon from an altitude, meters.
+ *
+ * This is what the ground has to cover: with a shorter patch the terrain ends
+ * in mid-air and the sky shows underneath it, which is exactly the "the ground
+ * just stops" look the viewer had at low altitude.
+ */
+export function horizonMeters(altitudeM: number): number {
+  const height = Math.max(0, Number.isFinite(altitudeM) ? altitudeM : 0)
+  return Math.sqrt(2 * EARTH_RADIUS_M * height)
+}
+
+/**
+ * Low zoom window that reaches the horizon, so there is always terrain
+ * under the whole view. Only `FAR_TILES²` requests, always blurry: it is the
+ * distant backdrop, never the area next to the plane.
+ */
+export function farWindow(
+  latDeg: number,
+  lonDeg: number,
+  altitudeM: number,
+  minSizeMeters = 0,
+): GroundWindow {
+  // 1.6× the horizon leaves margin for the haze that completes the edge; the
+  // 2.5× window keeps the sharp patch surrounded at any zoom.
+  const needed = Math.max(1.6 * horizonMeters(altitudeM), 2.5 * minSizeMeters)
+  // size(z) = FAR_TILES * TILE_PX * mpp(z); pick the coarsest zoom that covers.
+  let z = 18
+  while (z > 2 && groundWindow(latDeg, lonDeg, z, FAR_TILES).sizeMeters < needed) z -= 1
+  return groundWindow(latDeg, lonDeg, z, FAR_TILES)
+}
+
+/** Window of the sharp patch drawn over the wide one, centred on the plane. */
+export function detailWindow(
+  latDeg: number,
+  lonDeg: number,
+  baseZoom: number,
+  n = DETAIL_TILES,
+): GroundWindow {
+  return groundWindow(latDeg, lonDeg, baseZoom + DETAIL_ZOOM_JUMP, n)
+}
+
+/**
+ * High resolution raster for the central area of the wide patch. It reuses
+ * the wide patch as its underlay (so it appears instantly and softly) and is
+ * feathered towards the rim, which is what makes it read as a detail area
+ * rather than a pasted square.
+ */
+export async function fetchGroundDetail(
+  win: GroundWindow,
+  base: GroundWindow,
+  baseCanvas: HTMLCanvasElement,
+  signal?: AbortSignal,
+  tilePx = TILE_PX,
+): Promise<HTMLCanvasElement | null> {
+  const underlay = underlayFor(base, baseCanvas, win)
+  const satellite = await compositeTiles(
+    SATELLITE_TEMPLATE,
+    win.z,
+    win.x0,
+    win.y0,
+    win.n,
+    signal,
+    tilePx,
+    underlay,
+  )
+  if (!satellite) return null
+  fadeDetailRim(satellite)
+  return satellite
 }
 
 /**

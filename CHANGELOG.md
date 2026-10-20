@@ -1,3 +1,24 @@
+## Suelo continuo hasta el horizonte y parche de detalle — 2026-10-20
+
+- El terreno **ya no acaba antes que la vista**: se añade una capa lejana de
+  bajo zoom que alcanza el horizonte real (√(2·R·h), ~39 km a 120 m, ~375 km
+  en crucero) y se funde con el cielo por niebla. Antes, a baja altitud, el
+  suelo terminaba dentro del encuadre y se veía el color de fondo bajo el
+  avión.
+- **Parche de detalle**: sobre el terreno amplio se dibuja un segundo parche
+  dos niveles de zoom más cerca, con su borde difuminado, de modo que la zona
+  alrededor del avión gana nitidez sin costuras visibles.
+- **Adiós a los huecos negros del terreno**: las teselas se piden con un
+  límite de 8 en paralelo, se reintentan dos veces y, si aun así fallan, se
+  pinta debajo la capa de bajo zoom (antes un 40 % de teselas caídas dejaba
+  agujeros negros y rayas). Se añade además un tono de suelo neutro como
+  último recurso, para que nunca se vea el negro del fondo.
+- La imagen satelital se dibuja **sin volver a iluminarla**: el sombreado PBR
+  apagaba y ensuciaba los colores reales de Esri (ese es el aspecto "mal" que
+  se veía en calidad Alta).
+- El horizonte ya no muestra una **banda pálida**: el tinte pintado del borde
+  lejano se sustituye por niebla progresiva.
+
 ## Calidad gráfica seleccionable y rendimiento en equipos modestos — 2026-10-20
 
 - Nueva pestaña **Ajustes › Rendimiento** y control **Calidad** dentro del
