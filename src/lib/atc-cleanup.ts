@@ -78,12 +78,14 @@ interface CleanupProfile {
   noiseBias: number
   /** Resta extra de ruido: más agresiva, más riesgo de tocar la voz. */
   overSubtraction: number
+  /** Corte del paso bajo: cuánto aire agudo se recorta (Hz). */
+  lowpassHz: number
 }
 
 const PROFILES: Record<Exclude<CleanupLevel, 'off'>, CleanupProfile> = {
-  suave: { floorDb: -10, noiseBias: 3.2, overSubtraction: 1 },
-  clara: { floorDb: -18, noiseBias: 3.2, overSubtraction: 1.25 },
-  maxima: { floorDb: -26, noiseBias: 3.2, overSubtraction: 1.6 },
+  suave: { floorDb: -10, noiseBias: 3.2, overSubtraction: 1, lowpassHz: 5600 },
+  clara: { floorDb: -18, noiseBias: 3.2, overSubtraction: 1.25, lowpassHz: 5200 },
+  maxima: { floorDb: -26, noiseBias: 3.2, overSubtraction: 1.6, lowpassHz: 4800 },
 }
 
 /** Subventanas de mínimo y su duración: cubren ~1,2 s de audio. */
@@ -279,7 +281,8 @@ export class AtcCleanup {
 
   constructor(sampleRate: number, level: CleanupLevel = 'off') {
     this.sampleRate = Math.max(8000, Math.min(96000, sampleRate))
-    this.fftSize = this.sampleRate >= 32000 ? 512 : 256
+    // La ventana se elige por duración (~10,7 ms), no por número de muestras.
+    this.fftSize = this.sampleRate >= 64000 ? 1024 : this.sampleRate >= 32000 ? 512 : 256
     this.hop = this.fftSize / 4
     this.bins = this.fftSize / 2 + 1
     // La primera muestra útil sale al llenar la ventana: fftSize − 1.
@@ -312,9 +315,6 @@ export class AtcCleanup {
     this.subWindowFrames = Math.max(6, Math.round((SUB_WINDOW_MS / 1000) * this.sampleRate / this.hop))
 
     this.highpass.highpass(this.sampleRate, 100)
-    // La voz de ATC vive por debajo de 4 kHz; esto quita el siseo agudo y las
-    // imágenes que deja el remuestreo del receptor.
-    this.lowpass.lowpass(this.sampleRate, Math.min(4800, this.sampleRate * 0.3))
     this.setLevel(level)
   }
 
@@ -323,6 +323,9 @@ export class AtcCleanup {
     if (level !== 'off') {
       this.profile = { ...PROFILES[level] }
       this.floorTarget = Math.pow(10, this.profile.floorDb / 20)
+      // La voz de ATC vive por debajo de 5 kHz; esto quita el siseo agudo y
+      // las imágenes que deja el remuestreo del receptor.
+      this.lowpass.lowpass(this.sampleRate, Math.min(this.profile.lowpassHz, this.sampleRate * 0.3))
     }
     this.level = level
   }
