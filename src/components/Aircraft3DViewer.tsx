@@ -114,6 +114,8 @@ interface SceneState {
   fetchToken: number
   abort: AbortController
   nextGroundCheckAt: number
+  /** Next time the provider attributions are refreshed (ms). */
+  nextAttributionAt: number
   /** Render distance multiplier (1–5) of the current patch. */
   range: number
   lastFrameAt: number
@@ -184,6 +186,9 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
   const [photoState, setPhotoState] = useState<PhotogrammetryState>('off')
   const photoStateRef = useRef<PhotogrammetryState>('off')
   photoStateRef.current = photoState
+  // Attribution the tiles themselves require (Google, data providers…).
+  const [photoAttribution, setPhotoAttribution] = useState('')
+  const photoAttributionRef = useRef('')
   const [autoScale, setAutoScale] = useState(() => viewerPixelRatio(performance.resolution))
   const [qualityOpen, setQualityOpen] = useState(false)
   const qualityPanelRef = useRef<HTMLDivElement>(null)
@@ -385,6 +390,7 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         fetchToken: 0,
         abort,
         nextGroundCheckAt: 0,
+        nextAttributionAt: 0,
         range: rangeRef.current,
         lastFrameAt: 0,
         modelObject: null,
@@ -612,6 +618,14 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
           const photo = state.photogrammetry
           offsetPhotogrammetry(state, motion ?? live)
           photo.update(state.camera, state.renderer)
+          if (now >= state.nextAttributionAt) {
+            state.nextAttributionAt = now + 2000
+            const text = photo.attributions().join(' · ')
+            if (text !== photoAttributionRef.current) {
+              photoAttributionRef.current = text
+              setPhotoAttribution(text)
+            }
+          }
           if (!state.flatHidden && photo.loaded()) {
             // The tiles now cover the terrain: retire the flat satellite ground
             // (it would otherwise z-fight with the real geometry).
@@ -621,6 +635,9 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         } else if (state.flatHidden) {
           state.groundGroup.visible = true
           state.flatHidden = false
+        } else if (photoAttributionRef.current) {
+          photoAttributionRef.current = ''
+          setPhotoAttribution('')
         }
 
         if (now >= state.nextGroundCheckAt) {
@@ -968,7 +985,7 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
           </span>
           <span className="tech text-right text-[9px] leading-tight text-white/45">
             {photoState === 'ready'
-              ? 'Google · Cesium ion · Modelos 3D del proyecto'
+              ? `${photoAttribution || 'Google · Cesium ion'} · Modelos 3D del proyecto`
               : `${attribution ? `${attribution} · ` : 'Cartografía procedural · '}Modelos 3D del proyecto`}
           </span>
         </div>

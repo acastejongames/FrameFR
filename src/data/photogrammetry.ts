@@ -33,7 +33,17 @@ export interface PhotogrammetryHandle {
   loaded: () => boolean
   /** Number of tiles currently displayed (diagnostics). */
   visibleTiles: () => number
+  /** Attribution lines required by the data provider (plain text). */
+  attributions: () => string[]
   dispose: () => void
+}
+
+/** Strips tags so provider attributions can be rendered as plain text. */
+function plainText(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export interface CreatePhotogrammetryOptions {
@@ -113,6 +123,11 @@ export async function loadPhotogrammetry(
     },
     loaded: () => loadedOnce,
     visibleTiles: () => tiles.visibleTiles.size,
+    attributions: () =>
+      tiles
+        .getAttributions()
+        .map((entry) => (typeof entry.value === 'string' ? plainText(entry.value) : ''))
+        .filter(Boolean),
     dispose: () => {
       tiles.dispose()
       tiles.group.removeFromParent()
