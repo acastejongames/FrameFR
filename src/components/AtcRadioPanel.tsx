@@ -179,13 +179,13 @@ export function AtcRadioPanel({
       {streamUrl && (
         <>
           <div className="radio-status" role="status" aria-live="polite">
-            Receptor cargado en {frequency} MHz. Pulsa “Start OpenWebRX+” dentro del panel para iniciar el audio.
+            Receptor cargado. Pulsa “Start OpenWebRX+” dentro del panel para iniciar el audio.
           </div>
           <div className="radio-frame">
             <iframe
               key={streamUrl}
               src={streamUrl}
-              title="Receptor SDR Alaró en OpenWebRX+"
+              title="Receptor OpenWebRX+"
               loading="lazy"
               allow="autoplay"
             />
@@ -193,9 +193,15 @@ export function AtcRadioPanel({
         </>
       )}
 
-      <p className="radio-note">
-        La recepción depende de que el receptor y su perfil estén disponibles. La ficha pública de Alaró enumera antenas de 144–430 MHz; la banda aérea queda fuera de ese rango publicado.
-      </p>
+      {receiver === 'alaro' ? (
+        <p className="radio-note">
+          La recepción depende de que el receptor y su perfil estén disponibles. La ficha pública de Alaró enumera antenas de 144–430 MHz; la banda aérea queda fuera de ese rango publicado.
+        </p>
+      ) : (
+        <p className="radio-note">
+          La sintonía depende de que el perfil del servidor cubra esta frecuencia. Si el receptor no permite insertar su página, usa “Abrir aparte”.
+        </p>
+      )}
       <div className="radio-links">
         <a href="https://aip.enaire.es/AIP/contenido_AIP/ENR/LE_ENR_2_3_en.html" target="_blank" rel="noopener noreferrer">
           Frecuencias en AIP ENAIRE

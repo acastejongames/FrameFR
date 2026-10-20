@@ -160,7 +160,8 @@ completa con:
   restablece el norte al pulsarla sin cambiar centro, zoom ni inclinación.
 - **Navegación 3D manual:** mantén pulsado el botón central/rueda del ratón y
   mueve el puntero para girar e inclinar; el botón derecho ya no rota el mapa.
-- **Radio ATC en el dock:** carga SDR Alaró (o una URL OpenWebRX+ personalizada), selecciona frecuencias de Palma y mantén el radar abierto. La vista del receptor se crea solo al pedirla; OpenWebRX lee la frecuencia del fragmento `#freq=<Hz>,mod=am` y la sintonía depende del perfil permitido por el servidor.\n- **Ajustes:** cuatro pestañas —**General** (actualizaciones en segundo plano,
+- **Radio ATC en el dock:** carga SDR Alaró (o una URL OpenWebRX+ personalizada), selecciona frecuencias de Palma y mantén el radar abierto. La vista del receptor se crea solo al pedirla; OpenWebRX lee la frecuencia del fragmento `#freq=<Hz>,mod=am` y la sintonía depende del perfil permitido por el servidor.
+- **Ajustes:** cuatro pestañas —**General** (actualizaciones en segundo plano,
   límite de aeronaves y orden), **Interfaz** (tamaño ×0.9/×1/×1.25, elementos
   visibles incluida la brújula, etiquetas y estilo), **Telemetría** (proveedor
   y frecuencia ADS-B) y **Rendimiento** (calidad de malla y texturas del visor
@@ -381,7 +382,8 @@ https://acastejongames.github.io/FrameFR/
 - Datos ADS-B: [adsb.lol](https://adsb.lol) · [ADSB.one](https://www.adsb.one) ·
   [adsb.fi](https://adsb.fi) · [airplanes.live](https://airplanes.live) ·
   [Flightradar24](https://www.flightradar24.com) · [OpenSky Network](https://opensky-network.org).
-- Fotogrametría 3D: [Google Photorealistic 3D Tiles](https://cesium.com/platform/cesium-ion/) servidos vía [Cesium ion, asset 2275207](https://ion.cesium.com/assets/2275207/).\n- Fotografías: [Planespotters](https://www.planespotters.net) · JetPhotos ·
+- Fotogrametría 3D: [Google Photorealistic 3D Tiles](https://cesium.com/platform/cesium-ion/) servidos vía [Cesium ion, asset 2275207](https://ion.cesium.com/assets/2275207/).
+- Fotografías: [Planespotters](https://www.planespotters.net) · JetPhotos ·
   [Wikimedia Commons](https://commons.wikimedia.org).
 - Iconos: [Lucide](https://lucide.dev) · [MapLibre GL](https://maplibre.org) ·
   [Tailwind CSS](https://tailwindcss.com).
