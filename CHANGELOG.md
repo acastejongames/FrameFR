@@ -17,9 +17,10 @@
   la voz. El arranque se ceba con el primer mínimo para no atenuar la primera
   transmisión.
 - Medido con voz sintética y ruido de receptor (SNR 22,8 dB): el ruido de las
-  pausas baja **15,6 dB** en *Clara*, la voz conserva su nivel (**−0,09 dB**),
-  el timbre varía **0,16 dB** por banda entre 300 y 3400 Hz y no hay recortes.
-  Con SNR 13 dB la voz sigue en −0,2 dB y el timbre en 0,5 dB.
+  pausas baja **15,5 dB** en *Clara*, la voz conserva su nivel (**−0,11 dB**),
+  el timbre varía **0,24 dB** por banda entre 300 y 3400 Hz, el bombeo queda
+  en 0,09 dB y no hay recortes. Con SNR 13 dB la voz sigue en −0,2 dB
+  (*Suave*), −0,24 dB (*Clara*).
 - «Sin filtrar» es un **bypass bit a bit** y la latencia añadida es de 513
   muestras (~10,7 ms a 48 kHz), imperceptible al escuchar.
 - `npm run audio-lab` mide reducción en pausas, nivel y timbre de la voz,
