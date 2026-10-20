@@ -65,7 +65,14 @@ export function AircraftDetail({
 }: AircraftDetailProps) {
   const silhouetteRef = useRef<HTMLCanvasElement>(null)
   const phase = phaseOf(aircraft)
-  const model3d: Aircraft3DModel | null = matchAircraft3D(aircraft.type, aircraft.fullModel)
+  // Sticky match: live feeds sometimes report a position without `type`/
+  // `fullModel`; the 3D viewer must not unmount (and reset its camera) on
+  // those ticks, so the last match for this aircraft sticks until it changes.
+  const model3dSticky = useRef<{ id: string; model: Aircraft3DModel } | null>(null)
+  const matched = matchAircraft3D(aircraft.type, aircraft.fullModel)
+  if (matched) model3dSticky.current = { id: aircraft.id, model: matched }
+  const model3d: Aircraft3DModel | null =
+    matched ?? (model3dSticky.current?.id === aircraft.id ? model3dSticky.current.model : null)
   const [viewerOpen, setViewerOpen] = useState(false)
 
   // Close the 3D viewer when the selection changes to another aircraft.

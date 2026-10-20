@@ -18,7 +18,9 @@ import {
   tilePosition,
   tileUrl,
   tileZoomForAltitude,
+  viewWindow,
 } from '../src/data/mapTiles'
+import { motionTarget, MotionSampler, shortestArcDeg } from '../src/engine/motionSampler'
 import { northResetDelta } from '../src/components/MapCompass'
 /**
  * Headless sanity check for the data layer.
@@ -527,9 +529,9 @@ console.log('· Teselas del terreno del visor 3D…')
   check(
     terrain.offsetX === (win.x0 - terrain.x0 * 4) * 64 &&
       terrain.offsetY === (win.y0 - terrain.y0 * 4) * 64 &&
-      terrain.offsetX + 512 <= 3 * 256 &&
-      terrain.offsetY + 512 <= 3 * 256,
-    'teselas: la ventana del DEM cabe en el bloque 3x3',
+      terrain.offsetX + 512 <= terrain.blockX * 256 &&
+      terrain.offsetY + 512 <= terrain.blockY * 256,
+    'teselas: la ventana del DEM cabe en su bloque de teselas',
   )
   const off = groundWindow(40, -3.5, 13)
   check(
@@ -545,6 +547,41 @@ console.log('· Teselas del terreno del visor 3D…')
   check(decodeTerrariumPixel(129, 0, 0) === 256, 'teselas: terrarium +256 m')
   check(Math.abs(decodeTerrariumPixel(128, 1, 0) - 1) < 0.01, 'teselas: terrarium +1 m')
   check(tileUrl('https://x/{z}/{x}/{y}.png', 5, 9, 3) === 'https://x/5/9/3.png', 'teselas: URL XYZ')
+  const base = viewWindow(40, -3.5, 11_000, 1)
+  check(base.z === 11 && base.n === 8, 'teselas: distancia ×1 usa la ventana base')
+  const d2 = viewWindow(40, -3.5, 11_000, 2)
+  check(d2.z === 10 && d2.n === 8 && Math.abs(d2.sizeMeters - 2 * base.sizeMeters) < 1, 'teselas: ×2 duplica el lado')
+  const d3 = viewWindow(40, -3.5, 11_000, 3)
+  check(d3.z === 9 && d3.n === 6 && Math.abs(d3.sizeMeters - 3 * base.sizeMeters) < 1, 'teselas: ×3 triplica el lado')
+  const d5 = viewWindow(40, -3.5, 11_000, 5)
+  check(d5.z === 9 && d5.n === 10 && Math.abs(d5.sizeMeters - 5 * base.sizeMeters) < 1, 'teselas: ×5 quintuplica el lado')
+  const terrain5 = terrainTilesOf(d5)
+  check(
+    terrain5.offsetX + 10 * 64 <= terrain5.blockX * 256 && terrain5.offsetY + 10 * 64 <= terrain5.blockY * 256,
+    'teselas: el DEM de ×5 cubre su ventana',
+  )
+  check(viewWindow(40, -3.5, 11_000, 9).n === 10, 'teselas: la distancia se recorta en 5')
+}
+
+console.log('· Interpolación de movimiento del visor 3D…')
+{
+  check(shortestArcDeg(350, 10) === 20 && shortestArcDeg(10, 350) === -20, 'movimiento: arco de rumbo más corto')
+  const prev = { t: 0, lat: 40, lon: -3, altM: 10_000, headingDeg: 350, speedMs: 230, vsMs: 0, onGround: false }
+  const last = { t: 1000, lat: 40.002, lon: -3, altM: 10_000, headingDeg: 10, speedMs: 230, vsMs: 0, onGround: false }
+  const mid = motionTarget(prev, last, 500)
+  check(Math.abs(mid.lat - 40.001) < 1e-9, 'movimiento: interpolación lineal entre informes')
+  check(Math.abs(shortestArcDeg(0, mid.headingDeg)) < 1e-9, 'movimiento: el rumbo cruza el norte sin dar la vuelta')
+  const stale = motionTarget(prev, last, 30_000)
+  const travelledM = (stale.lat - last.lat) * 111_320
+  check(travelledM > 200 && travelledM < 230 * 2.5, 'movimiento: la deriva muerta queda limitada a segundos')
+  const single = motionTarget(null, { ...last, headingDeg: 0 }, 12_000)
+  check(single.lat > last.lat && Math.abs(single.lon - last.lon) < 1e-6, 'movimiento: el primer informe avanza al norte')
+  const sampler = new MotionSampler()
+  sampler.push(prev)
+  check(sampler.stateAt(0) !== null, 'movimiento: estado inicial disponible')
+  sampler.push({ ...last, lat: 45 })
+  const afterJump = sampler.stateAt(2000)
+  check((afterJump?.lat ?? 0) > 44.9, 'movimiento: el teletransporte reinicia la pista')
 }
 
 if (failures > 0) {

@@ -24,8 +24,12 @@ export const TERRAIN_TEMPLATE = 'https://s3.amazonaws.com/elevation-tiles-prod/t
 const HORIZON_RGB = '212, 228, 240'
 
 export const TILE_PX = 256
-/** Satellite tiles per side of the ground patch. Terrain uses ¼ as many at z+2. */
+/** Satellite tiles per side of the base ground patch. Terrain uses ¼ as many at z−2. */
 export const GROUND_TILES = 8
+
+/** Render-distance multipliers offered by the 3D viewer (1 = default, 5 = max). */
+export const VIEW_DISTANCES = [1, 2, 3, 4, 5] as const
+export type ViewDistance = (typeof VIEW_DISTANCES)[number]
 
 const EARTH_MERCATOR_RADIUS = 156_543.03
 
@@ -59,7 +63,7 @@ export interface GroundPatch {
 /** Terrain heights (meters, row-major; row 0 is the north edge, like the raster). */
 export interface TerrainPatch {
   heights: Float32Array
-  /** Samples per side (512 = the window's 8 z-tiles ÷ 4, i.e. one terrarium pixel per 4 sat px at z−2). */
+  /** Samples per side (`n*64`: one terrarium pixel per 4 sat px at z−2). */
   samples: number
   window: GroundWindow
 }
@@ -90,9 +94,9 @@ export function tilePosition(latDeg: number, lonDeg: number, z: number): { fx: n
 /**
  * Builds the square tile window centred on a position.
  *
- * The window is aligned to tile boundaries so the satellite raster (8×8 tiles
- * at z) and the terrain raster (a 3×3 block of terrarium tiles at z−2) cover
- * the exact same piece of the world.
+ * The window is aligned to tile boundaries so the satellite raster (`n`×`n`
+ * tiles at z) and the terrain raster (a small block of terrarium tiles at
+ * z−2) cover the exact same piece of the world.
  */
 export function groundWindow(latDeg: number, lonDeg: number, z: number, n = GROUND_TILES): GroundWindow {
   const { fx, fy } = tilePosition(latDeg, lonDeg, z)
@@ -113,13 +117,36 @@ export function groundWindow(latDeg: number, lonDeg: number, z: number, n = GROU
 }
 
 /**
+ * Tile layout covering `mult`× the base window: the zoom drops one or two
+ * levels while the tile side grows, so the request count stays in the
+ * 36–100 range at every distance.
+ */
+function viewLayout(mult: number): { zoomOffset: number; n: number } {
+  if (mult >= 5) return { zoomOffset: 2, n: 10 }
+  if (mult >= 4) return { zoomOffset: 2, n: 8 }
+  if (mult >= 3) return { zoomOffset: 2, n: 6 }
+  if (mult >= 2) return { zoomOffset: 1, n: 8 }
+  return { zoomOffset: 0, n: GROUND_TILES }
+}
+
+/**
+ * Ground window at the current render distance: the base altitude window
+ * (see `tileZoomForAltitude`) widened `mult` times towards the horizon.
+ */
+export function viewWindow(latDeg: number, lonDeg: number, altitudeM: number, mult = 1): GroundWindow {
+  const clamped = Math.max(1, Math.min(5, Math.round(mult)))
+  const { zoomOffset, n } = viewLayout(clamped)
+  return groundWindow(latDeg, lonDeg, tileZoomForAltitude(altitudeM) - zoomOffset, n)
+}
+
+/**
  * Terrain tile block that covers the same world window as `win`.
  *
- * One terrarium tile at z−2 equals 4×4 satellite tiles at z, so the 8×8
- * window needs exactly 512×512 DEM pixels. The window starts on a z-tile
- * boundary (256 sat px = 64 DEM px), which can straddle up to 3×3 tiles at
- * z−2; the returned block plus the DEM-pixel offset of the window locates
- * the exact 512×512 region inside it.
+ * One terrarium tile at z−2 equals 4×4 satellite tiles at z, so the window
+ * needs exactly `n*64` DEM pixels per side. The window starts on a z-tile
+ * boundary (256 sat px = 64 DEM px), which can straddle a few tiles at z−2;
+ * the returned block plus the DEM-pixel offset of the window locates the
+ * exact region inside it.
  */
 export function terrainTilesOf(win: GroundWindow): {
   z: number
@@ -127,16 +154,23 @@ export function terrainTilesOf(win: GroundWindow): {
   y0: number
   offsetX: number
   offsetY: number
+  blockX: number
+  blockY: number
 } {
   const z = win.z - 2
   const x0 = Math.floor(win.x0 / 4)
   const y0 = Math.floor(win.y0 / 4)
+  const offsetX = (win.x0 - x0 * 4) * 64
+  const offsetY = (win.y0 - y0 * 4) * 64
+  const samples = win.n * (TILE_PX / 4)
   return {
     z,
     x0,
     y0,
-    offsetX: (win.x0 - x0 * 4) * 64,
-    offsetY: (win.y0 - y0 * 4) * 64,
+    offsetX,
+    offsetY,
+    blockX: Math.ceil((offsetX + samples) / TILE_PX),
+    blockY: Math.ceil((offsetY + samples) / TILE_PX),
   }
 }
 
@@ -258,9 +292,8 @@ export async function fetchGroundPatch(win: GroundWindow, signal?: AbortSignal):
  * Returns null when the DEM cannot be loaded (the ground stays flat).
  */
 export async function fetchTerrainPatch(win: GroundWindow, signal?: AbortSignal): Promise<TerrainPatch | null> {
-  const { z, x0, y0, offsetX, offsetY } = terrainTilesOf(win)
-  const block = 3
-  const samples = TILE_PX * 2
+  const { z, x0, y0, offsetX, offsetY, blockX, blockY } = terrainTilesOf(win)
+  const samples = win.n * (TILE_PX / 4)
   const heights = new Float32Array(samples * samples)
   const ctxOf = (img: HTMLImageElement): ImageData | null => {
     const canvas = document.createElement('canvas')
@@ -275,8 +308,8 @@ export async function fetchTerrainPatch(win: GroundWindow, signal?: AbortSignal)
     }
   }
   const tiles: Array<Promise<ImageData | null>> = []
-  for (let ty = 0; ty < block; ty++) {
-    for (let tx = 0; tx < block; tx++) {
+  for (let ty = 0; ty < blockY; ty++) {
+    for (let tx = 0; tx < blockX; tx++) {
       tiles.push(
         loadTileImage(tileUrl(TERRAIN_TEMPLATE, z, x0 + tx, y0 + ty), signal).then((img) =>
           img ? ctxOf(img) : null,
@@ -287,15 +320,15 @@ export async function fetchTerrainPatch(win: GroundWindow, signal?: AbortSignal)
   const decoded = await Promise.all(tiles)
   // Tiles that do not touch the window may be missing; overlapping ones may not.
   const overlapsWindow = (index: number): boolean => {
-    const sx = (index % block) * TILE_PX
-    const sy = Math.floor(index / block) * TILE_PX
+    const sx = (index % blockX) * TILE_PX
+    const sy = Math.floor(index / blockX) * TILE_PX
     return sx < offsetX + samples && sx + TILE_PX > offsetX && sy < offsetY + samples && sy + TILE_PX > offsetY
   }
   if (decoded.some((tile, index) => !tile && overlapsWindow(index))) return null
   decoded.forEach((tile, index) => {
     if (!tile) return
-    const tileX = index % block
-    const tileY = Math.floor(index / block)
+    const tileX = index % blockX
+    const tileY = Math.floor(index / blockX)
     const data = tile.data
     for (let py = 0; py < TILE_PX; py++) {
       for (let px = 0; px < TILE_PX; px++) {

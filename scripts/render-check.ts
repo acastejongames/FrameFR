@@ -326,6 +326,11 @@ expect(Boolean(viewerDialog), 'el visor 3D abre su diálogo')
 expect(viewerDialog?.textContent?.includes('escala 1:1') ?? false, 'el visor declara la escala 1:1')
 expect(viewerDialog?.textContent?.includes('Altitud real') ?? false, 'el visor muestra la altitud real sobre el mapa')
 expect(viewerDialog?.textContent?.includes('orbitar') ?? false, 'el visor explica cómo orbitar la cámara')
+expect(
+  viewerDialog?.textContent?.includes('Distancia de renderizado') ?? false,
+  'el visor ofrece la distancia de renderizado',
+)
+expect(Boolean(viewerDialog?.querySelector('[aria-label="Distancia de renderizado ×5"]')), 'el visor llega a ×5')
 window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
 await flush()
 expect(!container.querySelector('[role="dialog"][aria-label^="Vista 3D de"]'), 'Escape cierra el visor 3D')

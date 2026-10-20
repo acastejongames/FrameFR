@@ -1,3 +1,20 @@
+## Cámara firme, movimiento interpolado y distancia de renderizado ×5 — 2026-10-20
+
+- La cámara del visor 3D **se queda donde la pones**: los refrescos de
+  telemetría ya no la recolocan ni la sacuden, el objetivo orbita sobre la
+  altitud suavizada y el asentamiento tras arrastrar es independiente de los
+  FPS. Un informe de posición que llegue sin `type`/modelo ya no desmonta el
+  visor ni devuelve la cámara a la vista por defecto.
+- **Movimiento realista del avión** en la vista 3D: entre informes el modelo
+  sigue la trayectoria de las posiciones, velocidad, altitud y rumbo
+  informados (rumbo por arco más corto, 350°→10° pasa por el norte), y si la
+  fuente se retrasa la deriva muerta se frena en segundos en lugar de
+  inventar rumbo. El suelo se desliza bajo el avión sin saltos. El mapa
+  continúa dibujando únicamente posiciones informadas.
+- Nueva **Distancia de renderizado ×1–×5** en el propio visor (×1 por
+  defecto, preferencia recordada): ×5 muestra cinco veces más terreno hasta
+  el horizonte descargando como mucho 100 teselas.
+
 ## Horizonte continuo y el doble de distancia en la Vista 3D — 2026-10-20
 
 - Eliminada la **línea vertical amarilla** que bajaba del avión al suelo: la

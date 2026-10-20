@@ -13,14 +13,16 @@ import {
 import {
   fetchGroundPatch,
   fetchTerrainPatch,
-  groundWindow,
-  tileZoomForAltitude,
+  VIEW_DISTANCES,
+  viewWindow,
   type GroundPatch,
   type GroundWindow,
   type TerrainPatch,
 } from '@/data/mapTiles'
+import { MotionSampler, EARTH_M_PER_DEG, type MotionSample } from '@/engine/motionSampler'
 import type { RenderAircraft } from '@/engine/fleetController'
 import { formatHeading, formatSpeed } from '@/lib/format'
+import { usePersistentState } from '@/hooks/usePersistentState'
 
 interface Aircraft3DViewerProps {
   aircraft: RenderAircraft
@@ -35,6 +37,8 @@ const GROUND_BG = 0x0d1218
 const MESH_SEGMENTS = 256
 /** Minimum drift before the ground patch re-centres, meters (scales with the window). */
 const REFRESH_DRIFT_M = 2_000
+/** Orbit damping time constant, seconds (applied per frame, frame-rate independent). */
+const DAMPING_TAU_S = 0.22
 
 interface SceneState {
   renderer: THREE.WebGLRenderer
@@ -47,16 +51,22 @@ interface SceneState {
   scaledHeightM: number
   raf: number
   disposed: boolean
-  lastLat: number
-  lastLon: number
-  groundEastM: number
-  groundNorthM: number
+  /** Smoothed telemetry track of the model. */
+  sampler: MotionSampler
+  /** Last report fed to the sampler (to detect new observations). */
+  lastPushed: Omit<MotionSample, 't'> | null
+  /** Position of the current ground window centre (patch anchor). */
+  anchorLat: number
+  anchorLon: number
   patchWindow: GroundWindow | null
   terrain: TerrainPatch | null
   fetching: boolean
   fetchToken: number
   abort: AbortController
   nextGroundCheckAt: number
+  /** Render distance multiplier (1–5) of the current patch. */
+  range: number
+  lastFrameAt: number
 }
 
 /**
@@ -75,6 +85,14 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
   const [loading, setLoading] = useState(true)
   const [groundLoading, setGroundLoading] = useState(true)
   const [attribution, setAttribution] = useState('')
+  const [range, setRange] = usePersistentState<number>(
+    'aeroscope:viewer3d:range',
+    1,
+    (value): value is number => typeof value === 'number' && value >= 1 && value <= 5,
+    (value) => Math.max(1, Math.min(5, Math.round(Number(value) || 1))),
+  )
+  const rangeRef = useRef(range)
+  rangeRef.current = range
 
   useEffect(() => {
     const container = containerRef.current
@@ -106,7 +124,7 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
       const camera = new THREE.PerspectiveCamera(
         45,
         Math.max(container.clientWidth, 1) / Math.max(container.clientHeight, 1),
-        0.5,
+        1,
         200_000,
       )
 
@@ -147,18 +165,37 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         scaledHeightM: model.realLengthM * 0.3,
         raf: 0,
         disposed: false,
-        lastLat: liveRef.current.aircraft.lat,
-        lastLon: liveRef.current.aircraft.lon,
-        groundEastM: 0,
-        groundNorthM: 0,
+        sampler: new MotionSampler(),
+        lastPushed: null,
+        anchorLat: liveRef.current.aircraft.lat,
+        anchorLon: liveRef.current.aircraft.lon,
         patchWindow: null,
         terrain: null,
         fetching: false,
         fetchToken: 0,
         abort,
         nextGroundCheckAt: 0,
+        range: rangeRef.current,
+        lastFrameAt: 0,
       }
       sceneRef.current = state
+
+      // Dev/test seam: browser tests read the live camera state from here to
+      // assert the camera stays where the user put it across telemetry ticks.
+      if (import.meta.env.DEV) {
+        const w = window as unknown as {
+          __viewer3d?: { setups: number; snap?: () => Record<string, unknown> }
+        }
+        w.__viewer3d = {
+          setups: (w.__viewer3d?.setups ?? 0) + 1,
+          snap: () => ({
+            cam: state?.camera.position.toArray() ?? null,
+            target: state?.controls.target.toArray() ?? null,
+            aircraftId: liveRef.current.aircraft.id,
+            modelId: liveRef.current.model.id,
+          }),
+        }
+      }
 
       const loader = new GLTFLoader()
       loader.load(
@@ -204,38 +241,69 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
       const frame = (now: number): void => {
         if (!state || state.disposed) return
         state.raf = window.requestAnimationFrame(frame)
-        const live = liveRef.current.aircraft
-        const y = modelAltitudeY(live.altitude, live.onGround, state.scaledHeightM)
-        state.pivot.position.y = y
-        state.pivot.rotation.y = headingToRotationY(
-          live.heading,
-          liveRef.current.model.noseAlongPositiveX,
-        )
-        state.controls.target.y = y
 
-        // The map moves under the aircraft so the flight is visible against the
-        // real terrain. Scene axes: +X = east, -Z = north.
-        const dLat = live.lat - state.lastLat
-        const dLon = live.lon - state.lastLon
-        if (dLat !== 0 || dLon !== 0) {
-          state.groundNorthM += dLat * 111_320
-          state.groundEastM += dLon * 111_320 * Math.cos((live.lat * Math.PI) / 180)
-          state.lastLat = live.lat
-          state.lastLon = live.lon
+        // Feed the motion sampler once per telemetry observation; the
+        // rendered state interpolates smoothly between reports.
+        const live = liveRef.current.aircraft
+        const observed: Omit<MotionSample, 't'> = {
+          lat: live.lat,
+          lon: live.lon,
+          altM: modelAltitudeY(live.altitude, live.onGround, state.scaledHeightM),
+          headingDeg: live.heading,
+          speedMs: live.groundSpeed * 0.514_444,
+          vsMs: live.verticalRate * 0.005_08,
+          onGround: live.onGround,
         }
-        if (state.patchWindow) {
-          state.groundGroup.position.set(
-            state.patchWindow.offsetEastM - state.groundEastM,
-            0,
-            -(state.patchWindow.offsetNorthM - state.groundNorthM),
+        if (
+          !state.lastPushed ||
+          state.lastPushed.lat !== observed.lat ||
+          state.lastPushed.lon !== observed.lon ||
+          state.lastPushed.altM !== observed.altM ||
+          state.lastPushed.headingDeg !== observed.headingDeg ||
+          state.lastPushed.speedMs !== observed.speedMs ||
+          state.lastPushed.vsMs !== observed.vsMs ||
+          state.lastPushed.onGround !== observed.onGround
+        ) {
+          state.sampler.push({ t: now, ...observed })
+          state.lastPushed = observed
+        }
+        const motion = state.sampler.stateAt(now)
+        if (motion) {
+          const y = motion.altM
+          state.pivot.position.y = y
+          state.pivot.rotation.y = headingToRotationY(
+            motion.headingDeg,
+            liveRef.current.model.noseAlongPositiveX,
           )
+          // The orbit target rides the smoothed altitude so the camera keeps
+          // the framing the user chose instead of pitching with each report.
+          state.controls.target.y = y
+
+          // The map moves under the aircraft so the flight is visible against
+          // the real terrain. Scene axes: +X = east, -Z = north.
+          if (state.patchWindow) {
+            const driftNorthM = (motion.lat - state.anchorLat) * EARTH_M_PER_DEG
+            const driftEastM =
+              (motion.lon - state.anchorLon) *
+              EARTH_M_PER_DEG *
+              Math.cos((state.anchorLat * Math.PI) / 180)
+            state.groundGroup.position.set(
+              state.patchWindow.offsetEastM - driftEastM,
+              0,
+              -(state.patchWindow.offsetNorthM - driftNorthM),
+            )
+          }
         }
 
         if (now >= state.nextGroundCheckAt) {
           state.nextGroundCheckAt = now + 500
-          requestGround(state, live, setGroundLoading, setAttribution)
+          requestGround(state, motion, live, setGroundLoading, setAttribution, rangeRef.current)
         }
 
+        // Time-based damping: the orbit settles in the same time at any fps.
+        const dtS = state.lastFrameAt ? Math.min((now - state.lastFrameAt) / 1000, 0.5) : 1 / 60
+        state.lastFrameAt = now
+        state.controls.dampingFactor = 1 - Math.exp(-dtS / DAMPING_TAU_S)
         state.controls.update()
         state.renderer.render(state.scene, state.camera)
       }
@@ -385,6 +453,29 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
       </div>
 
       <div className="pointer-events-none absolute bottom-3 right-3 flex max-w-[46vw] flex-col items-end gap-1">
+        <div
+          className="tech pointer-events-auto flex items-center gap-1 rounded border border-white/[0.09] bg-black/55 px-2 py-1"
+          role="group"
+          aria-label="Distancia de renderizado"
+        >
+          <span className="text-[9px] uppercase tracking-wider text-white/45">Distancia de renderizado</span>
+          {VIEW_DISTANCES.map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setRange(value)}
+              aria-label={`Distancia de renderizado ×${value}`}
+              aria-pressed={range === value}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition ${
+                range === value
+                  ? 'bg-accent text-[#111317]'
+                  : 'text-white/70 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              ×{value}
+            </button>
+          ))}
+        </div>
         <span className="tech rounded border border-white/[0.09] bg-black/55 px-2.5 py-1 text-[10px] text-white/60">
           Arrastra para orbitar · Rueda para acercar
         </span>
@@ -432,23 +523,36 @@ function skyTexture(): THREE.CanvasTexture {
 /** Loads (or re-loads) the ground patch under the aircraft. */
 function requestGround(
   state: SceneState,
+  motion: { lat: number; lon: number; altM: number; onGround: boolean } | null,
   live: RenderAircraft,
   setGroundLoading: (value: boolean) => void,
   setAttribution: (value: string) => void,
+  range: number,
 ): void {
-  const altitudeM = live.onGround ? 0 : live.altitude * 0.3048
-  const z = tileZoomForAltitude(altitudeM)
-  const drift = Math.hypot(state.groundEastM, state.groundNorthM)
+  const position = motion ?? {
+    lat: live.lat,
+    lon: live.lon,
+    altM: modelAltitudeY(live.altitude, live.onGround, state.scaledHeightM),
+    onGround: live.onGround,
+  }
+  const altitudeM = position.onGround ? 0 : position.altM
+  const win = viewWindow(position.lat, position.lon, altitudeM, range)
+  const driftNorthM = (position.lat - state.anchorLat) * EARTH_M_PER_DEG
+  const driftEastM =
+    (position.lon - state.anchorLon) * EARTH_M_PER_DEG * Math.cos((state.anchorLat * Math.PI) / 180)
+  const drift = Math.hypot(driftEastM, driftNorthM)
   // Wide cruise windows tolerate more drift before paying for a re-fetch.
   const driftLimit = Math.max(REFRESH_DRIFT_M, (state.patchWindow?.sizeMeters ?? 0) * 0.08)
   const needs =
     !state.patchWindow ||
-    state.patchWindow.z !== z ||
+    state.patchWindow.z !== win.z ||
+    state.patchWindow.n !== win.n ||
+    state.range !== range ||
     drift > driftLimit
   if (!needs || state.fetching) return
   state.fetching = true
+  state.range = range
   if (!state.patchWindow) setGroundLoading(true)
-  const win = groundWindow(live.lat, live.lon, z)
   const token = ++state.fetchToken
   void Promise.all([
     fetchGroundPatch(win, state.abort.signal),
@@ -457,7 +561,7 @@ function requestGround(
     .then(([patch, terrain]) => {
       if (state.disposed || token !== state.fetchToken) return
       state.fetching = false
-      applyPatch(state, patch, terrain, live)
+      applyPatch(state, patch, terrain, position)
       setGroundLoading(false)
       setAttribution(
         patch.attribution ? `${patch.attribution}${terrain ? ' · Elevación: Mapzen/AWS' : ''}` : '',
@@ -475,7 +579,7 @@ function applyPatch(
   state: SceneState,
   patch: GroundPatch,
   terrain: TerrainPatch | null,
-  live: RenderAircraft,
+  position: { lat: number; lon: number },
 ): void {
   const win = patch.window
   if (state.groundObject) {
@@ -518,10 +622,11 @@ function applyPatch(
   state.groundGroup.add(state.groundObject)
   state.patchWindow = win
   state.terrain = terrain
-  state.groundEastM = 0
-  state.groundNorthM = 0
-  state.lastLat = live.lat
-  state.lastLon = live.lon
+  state.anchorLat = position.lat
+  state.anchorLon = position.lon
+  // Far plane always reaches the faded patch rim (needed at distance ×5).
+  state.camera.far = Math.max(200_000, win.sizeMeters * 1.1)
+  state.camera.updateProjectionMatrix()
   state.scene.fog = new THREE.Fog(
     new THREE.Color(SKY_HORIZON),
     win.sizeMeters * 0.3,

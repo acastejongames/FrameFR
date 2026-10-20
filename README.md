@@ -121,10 +121,14 @@ completa con:
   del avión —imágenes satelitales de Esri con relieve de terreno (Terrarium) y
   respaldo de OpenStreetMap— con cielo y horizonte; el avión vuela a su
   **altitud real** y rumbo informado. La cámara arranca en persecución detrás
-  del avión; arrastra para **orbitar**, usa la rueda para acercar y `Esc`
-  cierra. La ventana de suelo alcanza ~160 km de visión en crucero (menos
-  según baja la altitud) y su borde se funde con el cielo en el horizonte; se
-  re-centra y recarga según el avión avanza y su altitud.
+  del avión y **se queda donde la dejes** (arrastra para **orbitar**, rueda
+  para acercar, `Esc` cierra). El modelo se mueve **interpolando las
+  posiciones, velocidad, altitud y rumbo informados** entre partes, sin
+  saltos; el suelo se desliza bajo el avión con la misma suavidad. La ventana
+  de suelo alcanza ~160 km de visión en crucero (menos según baja la altitud),
+  ampliable hasta **×5 con la distancia de renderizado** del propio visor; su
+  borde se funde con el cielo en el horizonte y se re-centra según el avión
+  avanza y su altitud.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
   altitud, velocidad o indicativo.
 - **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
@@ -240,9 +244,10 @@ interfaz necesitan cambios.
   menos de 4 KB de bundle.
 - Three.js, los modelos GLB y las teselas del terreno solo se descargan al
   abrir la *Vista 3D* (chunk `Aircraft3DViewer` diferido). El suelo compone
-  8×8 teselas satelitales (~20–160 km de lado según altitud) más el relieve del
-  DEM público de Terrarium, y se re-centra solo cuando el avión se aleja lo
-  bastante del centro del parche. El modelo se normaliza en tiempo de ejecución
+  una ventana de teselas satelitales (~20–160 km de lado según altitud, ×5 con
+  la distancia de renderizado) más el relieve del DEM público de Terrarium, y
+  se re-centra solo cuando el avión se aleja lo bastante del centro del
+  parche. El modelo se normaliza en tiempo de ejecución
   a la longitud real de su variante: escala 1:1 garantizada aunque cada GLB
   venga en unidades distintas. La página de desarrollo `model-check.html`
   renderiza los cinco modelos con el registro real.

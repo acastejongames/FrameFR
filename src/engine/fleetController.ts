@@ -399,8 +399,8 @@ export class FleetController {
         (existing.ac.flightNumber || existing.ac.callsign) !== (aircraft.flightNumber || aircraft.callsign)
       ) this.renderDirty = true
       existing.reported = reported
-      existing.ac = aircraft
-      existing.hay = searchCorpus(aircraft)
+      existing.ac = mergeObservation(existing.ac, aircraft)
+      existing.hay = searchCorpus(existing.ac)
       existing.lastSeenAt = now
     } else {
       this.tracks.set(aircraft.id, {
@@ -641,8 +641,8 @@ export class FleetController {
       const labelChanged = (existing.ac.flightNumber || existing.ac.callsign) !== (ac.flightNumber || ac.callsign)
       if (positionChanged || iconChanged || labelChanged) this.renderDirty = true
       existing.reported = reported
-      existing.ac = ac
-      existing.hay = searchCorpus(ac)
+      existing.ac = mergeObservation(existing.ac, ac)
+      existing.hay = searchCorpus(existing.ac)
       existing.lastSeenAt = now
 
       if (ac.id === this.selectedId && positionChanged) {
@@ -879,6 +879,29 @@ export class FleetController {
     }
     for (const listener of this.listeners) listener()
   }
+}
+
+/**
+ * Merges a report into the previous observation of the same track.
+ *
+ * Telemetry always comes from the newest report, but metadata (type, model,
+ * registration, route…) sticks when the feed omits it on a cycle — live
+ * sources are inconsistent there, and losing `type` must not tear down the
+ * 3D viewer of the selected aircraft.
+ */
+function mergeObservation(base: Aircraft, incoming: Aircraft): Aircraft {
+  const merged: Aircraft = { ...base, ...incoming }
+  merged.type = incoming.type || base.type
+  merged.fullModel = incoming.fullModel || base.fullModel
+  merged.registration = incoming.registration || base.registration
+  merged.operator = incoming.operator || base.operator
+  merged.airlineName = incoming.airlineName || base.airlineName
+  merged.flightNumber = incoming.flightNumber || base.flightNumber
+  merged.squawk = incoming.squawk || base.squawk
+  merged.silhouette = incoming.silhouette || base.silhouette
+  merged.origin = incoming.origin ?? base.origin
+  merged.destination = incoming.destination ?? base.destination
+  return merged
 }
 
 function resetLiveTrail(track: Track): void {
