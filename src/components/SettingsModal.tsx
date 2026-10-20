@@ -19,6 +19,12 @@ import {
   RESOLUTION_LABELS,
   type PerformanceSettings,
 } from '@/data/quality'
+import {
+  GOOGLE_TILES_URL,
+  googleTilesKey,
+  maskedTilesKey,
+  setGoogleTilesKey,
+} from '@/data/photogrammetrySettings'
 import { PROVIDERS, type ProviderId } from '@/data/registry'
 import type { BasemapId } from '@/map/style'
 import { BASEMAPS } from '@/map/style'
@@ -46,6 +52,8 @@ interface SettingsModalProps {
   onSortChange: (sort: SortKey) => void
   performance: PerformanceSettings
   onPerformanceChange: (value: PerformanceSettings) => void
+  photogrammetry: boolean
+  onPhotogrammetryChange: (value: boolean) => void
 }
 
 type SettingsTab = 'general' | 'interface' | 'telemetry' | 'performance'
@@ -96,8 +104,13 @@ export function SettingsModal({
   onSortChange,
   performance,
   onPerformanceChange,
+  photogrammetry,
+  onPhotogrammetryChange,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
+  // The Google key lives only in this browser: read it on mount, save on demand.
+  const [tilesKey, setTilesKey] = useState(() => googleTilesKey())
+  const [keySaved, setKeySaved] = useState(false)
 
   // Close with Escape. A stable ref keeps the listener alive across parent
   // re-renders so the key cannot be lost mid-dispatch.
@@ -484,6 +497,78 @@ export function SettingsModal({
                       Nitidez con la que MapLibre dibuja el mapa 2D.
                     </p>
                   </div>
+                </div>
+              </section>
+
+              <section className="space-y-3 border-t border-white/[0.06] pt-3.5">
+                <div className={SECTION_TITLE}>Fotogrametría 3D</div>
+                <label className={TOGGLE_CLASS} htmlFor="photogrammetry-enabled">
+                  <span>
+                    <span className="block font-medium text-white/85">
+                      Google Photorealistic 3D Tiles
+                    </span>
+                    <span className="mt-1 block leading-snug text-white/45">
+                      Terreno, edificios y árboles en 3D reales, como en Google Earth. Sin clave
+                      válida el visor mantiene el satélite con relieve.
+                    </span>
+                  </span>
+                  <input
+                    id="photogrammetry-enabled"
+                    type="checkbox"
+                    checked={photogrammetry}
+                    onChange={(event) => onPhotogrammetryChange(event.target.checked)}
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-[#ffbe00]"
+                  />
+                </label>
+                <div>
+                  <label className={FIELD_LABEL} htmlFor="google-tiles-key">
+                    Clave de API de Google Maps Platform
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="google-tiles-key"
+                      type="password"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={tilesKey}
+                      placeholder="AIza…"
+                      onChange={(event) => {
+                        setTilesKey(event.target.value)
+                        setKeySaved(false)
+                      }}
+                      className={SELECT_CLASS}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGoogleTilesKey(tilesKey)
+                        setTilesKey(googleTilesKey())
+                        setKeySaved(true)
+                      }}
+                      className="shrink-0 rounded border border-accent/40 bg-accent/10 px-3 text-[11px] font-semibold text-accent transition hover:bg-accent/20"
+                    >
+                      Guardar
+                    </button>
+                  </div>
+                  <p className="mt-1 text-[10px] leading-snug text-white/30">
+                    {keySaved
+                      ? 'Clave guardada en este navegador. Abre la Vista 3D para aplicarla.'
+                      : maskedTilesKey()
+                        ? `Guardada en este navegador: ${maskedTilesKey()}.`
+                        : 'Se guarda solo en este navegador (localStorage); no viaja al repositorio.'}
+                  </p>
+                  <p className="mt-1 text-[10px] leading-snug text-white/30">
+                    Google exige una cuenta de facturación y la API «Map Tiles» activada en{' '}
+                    <a
+                      href="https://console.cloud.google.com/google/maps-apis/credentials"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-accent/80 underline decoration-dotted"
+                    >
+                      Google Cloud
+                    </a>
+                    . El endpoint es <span className="text-white/50">{GOOGLE_TILES_URL}</span>.
+                  </p>
                 </div>
               </section>
 

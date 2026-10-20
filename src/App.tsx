@@ -94,6 +94,11 @@ export default function App() {
     normalizePerformance,
   )
   const mapRatio = useMemo(() => mapPixelRatio(performance.map), [performance.map])
+  const [photogrammetry, setPhotogrammetry] = usePersistentState<boolean>(
+    'photogrammetry',
+    false,
+    (value): value is boolean => typeof value === 'boolean',
+  )
 
   /* --------------------------------------------------------- local state */
   const [fleetSize] = useState(Number(import.meta.env.VITE_FLEET_SIZE ?? 600) || 600)
@@ -465,6 +470,8 @@ export default function App() {
         onSortChange={setSortBy}
         performance={performance}
         onPerformanceChange={setPerformance}
+        photogrammetry={photogrammetry}
+        onPhotogrammetryChange={setPhotogrammetry}
       />
 
       {hubsManagerOpen && (

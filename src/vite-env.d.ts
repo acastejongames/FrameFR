@@ -13,6 +13,12 @@ interface ImportMetaEnv {
   readonly VITE_GLYPHS_URL?: string
   /** Default fleet size for the simulated provider. */
   readonly VITE_FLEET_SIZE?: string
+  /**
+   * Google Maps Platform key for the optional photorealistic 3D tiles.
+   * Billing is required by Google; without it the viewer keeps the satellite
+   * imagery and the elevation relief.
+   */
+  readonly VITE_GOOGLE_3D_TILES_KEY?: string
 }
 
 interface ImportMeta {
