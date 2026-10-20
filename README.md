@@ -69,6 +69,7 @@ Copia `.env.example` como `.env`. Todas son opcionales:
 | `VITE_FLEET_SIZE`    | `600`                     | Tamaño de la flota simulada (sólo `demo`)                |
 | `VITE_GLYPHS_URL`    | glifos de OpenFreeMap     | Tipografía de las etiquetas del mapa                     |
 | `VITE_BASE_PATH`     | `/<repo>/` en producción  | Ruta base del build                                      |
+| `VITE_CESIUM_ION_TOKEN` | vacío                  | Token gratuito de Cesium ion para la fotogrametría 3D     |
 
 ## 📡 Fuentes de datos
 
@@ -135,6 +136,23 @@ completa con:
   limite peticiones. El botón **Calidad** del propio visor permite cambiar
   al vuelo la malla, las texturas y la resolución de renderizado sin mover la
   cámara.
+- **Fotogrametría 3D gratis (Google 3D Tiles vía Cesium ion):** en
+  *Calidad* del visor o en **Ajustes › Rendimiento › Fotogrametría 3D** se
+  puede activar una capa con el terreno y los edificios reales en 3D, como en
+  Google Earth. Los mismos datos que usa Google Earth se sirven a través del
+  **plan Community gratuito de Cesium ion**, que **no pide tarjeta ni
+  prepago**: solo una cuenta gratuita y un *access token* (`assets:read`) que
+  se pega en los ajustes (o se define en el build con
+  `VITE_CESIUM_ION_TOKEN`) y **solo se guarda en este navegador**. El plan
+  gratuito incluye 1.000 peticiones del tileset raíz al mes y este visor solo
+  pide la raíz al abrir la vista y al alejarse 40 km del anclaje, así que cabe
+  de sobra; su licencia es para uso personal/no comercial. Sin token, o si
+  Cesium o Google lo rechazan, el visor mantiene el satélite + relieve y lo
+  explica en el propio control: la capa es siempre opcional y nunca rompe la
+  vista. El renderizador de teselas se carga en un chunk aparte al activarla,
+  la densidad (error objetivo y profundidad máxima) acompaña a la calidad de
+  malla elegida y, en cuanto llega la primera tesela, el suelo satelital plano
+  se oculta para no competir con la geometría real.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
   altitud, velocidad o indicativo.
 - **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
@@ -146,13 +164,14 @@ completa con:
   límite de aeronaves y orden), **Interfaz** (tamaño ×0.9/×1/×1.25, elementos
   visibles incluida la brújula, etiquetas y estilo), **Telemetría** (proveedor
   y frecuencia ADS-B) y **Rendimiento** (calidad de malla y texturas del visor
-  3D, resolución de renderizado automática o fija, calidad del mapa 2D y
-  perfiles rápidos para equipos modestos).
+  3D, resolución de renderizado automática o fija, calidad del mapa 2D,
+  perfiles rápidos para equipos modestos y el token de la fotogrametría 3D).
 - **Atajos:** `/` busca · `U` modo limpio · `Esc` cierra.
 
 Todo se guarda en el navegador: al recargar recuperas el proveedor, la
-frecuencia, los accesos de aeropuertos, el tamaño de la interfaz y si la
-telemetría continúa mientras la pestaña abierta está oculta.
+frecuencia, los accesos de aeropuertos, el tamaño de la interfaz, si la
+telemetría continúa mientras la pestaña abierta está oculta y el token de la
+fotogrametría (que nunca sale de tu equipo).
 
 ## 🏗️ Arquitectura
 
@@ -168,6 +187,8 @@ src/
 │  ├─ aircraftTypes.ts       #    Tipos de aeronave y familias de silueta
 │  ├─ aircraft3d.ts          #    Registro de modelos 3D y escala 1:1
 │  ├─ mapTiles.ts            #    Teselas satelitales y relieve del visor 3D
+│  ├─ photogrammetry.ts      #    Fotogrametría vía Cesium ion (chunk diferido)
+│  ├─ photogrammetrySettings.ts # Token y estado de la capa (sin three.js)
 │  ├─ category.ts            #    Clasificación comercial / carga / GA / militar
 │  ├─ hubs.ts                #    Accesos a aeropuertos (persistencia)
 │  ├─ globalSearch.ts        #    Búsqueda planetaria
@@ -276,6 +297,11 @@ interfaz necesitan cambios.
 - El relieve DEM se decodifica con muestreo reducido en las calidades media y
   baja (4× menos píxeles) y el visor suspende render y descargas con la
   pestaña oculta.
+- La **fotogrametría 3D** es opcional y perezosa: `3d-tiles-renderer` y sus
+  plugins viven en un chunk propio que solo se descarga al activar la capa,
+  nunca al abrir la aplicación (el chunk principal no crece). Con la capa
+  apagada —el valor por defecto— el visor usa exactamente el suelo satelital de
+  siempre.
 - La flota simulada avanza a 20 Hz en lugar de una vez por fotograma, con
   giro de rumbo independiente de los FPS: ~3× menos CPU en el modo demo.
 - Probado para una resolución de referencia de 2560 × 1440.

@@ -1,12 +1,28 @@
-## Sin fotogrametría de pago — 2026-10-20
+## Fotogrametría 3D gratis con Cesium ion — 2026-10-20
 
-- Se descarta la capa de **Google Photorealistic 3D Tiles**: Google obliga a
-  activar facturación y a un **prepago de 30 €**, fuera del alcance de este
-  proyecto. El visor 3D se queda con el suelo satelital de Esri + relieve
-  REAL (Terrarium), que es gratuito y no requiere clave de ningún tipo.
-- Se elimina la dependencia `3d-tiles-renderer`, el campo de clave de Google
-  en Ajustes y todo el estado asociado: menos código y un `package.json` más
-  ligero. No queda ninguna llamada a servicios de pago.
+- El visor puede mostrar **terreno y edificios reales en 3D**, como Google
+  Earth, sin pagar nada: los Google Photorealistic 3D Tiles se piden a través
+  del **plan Community gratuito de Cesium ion**, que **no pide tarjeta ni
+  prepago**. Se descartó la vía directa con una clave de Google Maps Platform
+  porque exige cuenta de facturación y un prepago de 30 €.
+- Se activa desde **Calidad** en el visor o en **Ajustes › Rendimiento ›
+  Fotogrametría 3D**, con el campo del token, instrucciones en tres pasos
+  (crear cuenta gratis, añadir el asset desde el Asset Depot, crear un token
+  `assets:read`) y el estado en vivo. El token se guarda **solo en este
+  navegador**, enmascarado, y al guardarlo se aplica al visor ya abierto sin
+  cerrarlo. También puede fijarse en el build con `VITE_CESIUM_ION_TOKEN`.
+- Plan gratuito: **1.000 peticiones del tileset raíz al mes**; este visor solo
+  pide la raíz al abrir y al re-anclar cada 40 km, así que cabe de sobra. Es
+  para uso personal/no comercial.
+- La capa es **opcional de verdad**: sin token, o si Cesium/Google lo
+  rechazan, el visor mantiene el satélite + relieve y lo explica en el propio
+  control; los estados son `off`, `nokey`, `loading`, `ready` y `error`.
+- `3d-tiles-renderer` va en un **chunk perezoso**: solo se descarga al activar
+  la capa y el arranque de la aplicación no paga su coste.
+- Densidad (error objetivo 6/12/24 y profundidad máxima 26/20/16) según la
+  calidad de malla, re-anclaje a los 40 km de deriva y retirada del suelo
+  satelital plano en cuanto llega la primera tesela. Atribución visible
+  «Google · Cesium ion» mientras la capa está activa.
 
 ## Suelo continuo hasta el horizonte y parche de detalle — 2026-10-20
 
@@ -94,7 +110,7 @@
 
 ## Vista 3D sobre el mapa real a pantalla completa — 2026-10-19
 
-- La *Vista 3D* ahora ocupa **toda la pantalla**, como las vistas 3D de
+- La _Vista 3D_ ahora ocupa **toda la pantalla**, como las vistas 3D de
   referencia: el avión en primer plano, el terreno real debajo y el horizonte
   al fondo.
 - El suelo ya no es una retícula oscura: se componen **imágenes satelitales**
@@ -126,7 +142,7 @@
   tiempo real.
 - Three.js y los GLB se cargan solo al abrir el visor (chunk diferido de
   ~640 kB); la vista3D del mapa con inclinación sigue disponible y se llama
-  *Inclinación* en la ficha.
+  _Inclinación_ en la ficha.
 - Nuevo `scripts/glb-inspect.mjs` (análisis de ejes/escala de modelos) y página
   de desarrollo `model-check.html` que renderiza los cinco modelos.
 - La tabla de tráfico ya no muestra rumbos con decimales crudos.
@@ -239,7 +255,7 @@ Todas las novedades de AeroScope se documentan aquí. El formato sigue
 
 ### Cambiado
 
-- El nombre del producto pasa de *FrameFR* a **AeroScope**.
+- El nombre del producto pasa de _FrameFR_ a **AeroScope**.
 - La interfaz adopta el lenguaje visual de AeroScope: ámbar sobre carbón,
   paneles mate y tipografía monoespaciada para las cifras.
 - `FleetController` acepta ahora un límite de aeronaves, una cadencia de

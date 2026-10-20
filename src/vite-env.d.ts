@@ -13,6 +13,12 @@ interface ImportMetaEnv {
   readonly VITE_GLYPHS_URL?: string
   /** Default fleet size for the simulated provider. */
   readonly VITE_FLEET_SIZE?: string
+  /**
+   * Cesium ion access token for the optional photorealistic 3D tiles.
+   * The free Community plan includes the Google tileset (no card); without a
+   * token the viewer keeps the satellite imagery and the elevation relief.
+   */
+  readonly VITE_CESIUM_ION_TOKEN?: string
 }
 
 interface ImportMeta {

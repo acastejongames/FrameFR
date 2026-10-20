@@ -19,6 +19,13 @@ import {
   RESOLUTION_LABELS,
   type PerformanceSettings,
 } from '@/data/quality'
+import {
+  CESIUM_ION_ASSET_URL,
+  CESIUM_ION_CONSOLE_URL,
+  cesiumIonToken,
+  maskedIonToken,
+  setCesiumIonToken,
+} from '@/data/photogrammetrySettings'
 import { PROVIDERS, type ProviderId } from '@/data/registry'
 import type { BasemapId } from '@/map/style'
 import { BASEMAPS } from '@/map/style'
@@ -46,6 +53,8 @@ interface SettingsModalProps {
   onSortChange: (sort: SortKey) => void
   performance: PerformanceSettings
   onPerformanceChange: (value: PerformanceSettings) => void
+  photogrammetry: boolean
+  onPhotogrammetryChange: (value: boolean) => void
 }
 
 type SettingsTab = 'general' | 'interface' | 'telemetry' | 'performance'
@@ -96,8 +105,13 @@ export function SettingsModal({
   onSortChange,
   performance,
   onPerformanceChange,
+  photogrammetry,
+  onPhotogrammetryChange,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
+  // The Google key lives only in this browser: read it on mount, save on demand.
+  const [tilesKey, setTilesKey] = useState(() => cesiumIonToken())
+  const [keySaved, setKeySaved] = useState(false)
 
   // Close with Escape. A stable ref keeps the listener alive across parent
   // re-renders so the key cannot be lost mid-dispatch.
@@ -117,7 +131,8 @@ export function SettingsModal({
   const handleTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number): void => {
     let nextIndex: number | null = null
     if (event.key === 'ArrowRight') nextIndex = (index + 1) % SETTINGS_TABS.length
-    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length
+    else if (event.key === 'ArrowLeft')
+      nextIndex = (index - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length
     else if (event.key === 'Home') nextIndex = 0
     else if (event.key === 'End') nextIndex = SETTINGS_TABS.length - 1
     if (nextIndex === null) return
@@ -142,7 +157,10 @@ export function SettingsModal({
         <div className="flex items-center justify-between border-b border-white/[0.07] bg-[#14171c] px-4 py-3">
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-accent" />
-            <h2 id="settings-title" className="cond text-sm font-bold uppercase tracking-wider text-white">
+            <h2
+              id="settings-title"
+              className="cond text-sm font-bold uppercase tracking-wider text-white"
+            >
               Ajustes
             </h2>
           </div>
@@ -200,11 +218,17 @@ export function SettingsModal({
                 <div className={SECTION_TITLE}>Funcionamiento</div>
                 <label className={TOGGLE_CLASS} htmlFor="background-updates">
                   <span>
-                    <span className="block font-medium text-white/85">Actualizaciones en segundo plano</span>
-                    <span id="background-updates-help" className="mt-1 block leading-snug text-white/45">
-                      Sigue recibiendo posiciones reales y construyendo la ruta del avión seleccionado
-                      mientras esta pestaña permanece abierta pero oculta o minimizada. Desactívalo en
-                      equipos poco potentes para pausar la telemetría al ocultar la página.
+                    <span className="block font-medium text-white/85">
+                      Actualizaciones en segundo plano
+                    </span>
+                    <span
+                      id="background-updates-help"
+                      className="mt-1 block leading-snug text-white/45"
+                    >
+                      Sigue recibiendo posiciones reales y construyendo la ruta del avión
+                      seleccionado mientras esta pestaña permanece abierta pero oculta o minimizada.
+                      Desactívalo en equipos poco potentes para pausar la telemetría al ocultar la
+                      página.
                     </span>
                   </span>
                   <input
@@ -268,7 +292,9 @@ export function SettingsModal({
                 <select
                   id="ui-scale"
                   value={String(uiScale)}
-                  onChange={(event) => onUiScaleChange(normalizeInterfaceScale(Number(event.target.value)))}
+                  onChange={(event) =>
+                    onUiScaleChange(normalizeInterfaceScale(Number(event.target.value)))
+                  }
                   className="mt-2 w-full rounded bg-ink-700 p-2 text-sm"
                 >
                   <option value="0.9">×0.9 · Compacta</option>
@@ -372,9 +398,9 @@ export function SettingsModal({
                 </div>
               </section>
               <p className="border-t border-white/[0.06] px-0.5 pt-3.5 leading-relaxed text-white/40">
-                Las posiciones se dibujan únicamente cuando las informa la fuente seleccionada. Si las
-                actualizaciones en segundo plano están activadas en General, se mantiene la misma
-                frecuencia mientras la pestaña abierta está oculta.
+                Las posiciones se dibujan únicamente cuando las informa la fuente seleccionada. Si
+                las actualizaciones en segundo plano están activadas en General, se mantiene la
+                misma frecuencia mientras la pestaña abierta está oculta.
               </p>
             </div>
           )}
@@ -484,6 +510,111 @@ export function SettingsModal({
                       Nitidez con la que MapLibre dibuja el mapa 2D.
                     </p>
                   </div>
+                </div>
+              </section>
+
+              <section className="space-y-3 border-t border-white/[0.06] pt-3.5">
+                <div className={SECTION_TITLE}>Fotogrametría 3D · gratis</div>
+                <label className={TOGGLE_CLASS} htmlFor="photogrammetry-enabled">
+                  <span>
+                    <span className="block font-medium text-white/85">
+                      Google 3D Tiles vía Cesium ion
+                    </span>
+                    <span className="mt-1 block leading-snug text-white/45">
+                      Terreno, edificios y árboles en 3D reales. La cuenta gratuita de Cesium ion
+                      incluye este tileset: no pide tarjeta ni prepago. Sin token válido el visor
+                      mantiene el satélite con relieve.
+                    </span>
+                  </span>
+                  <input
+                    id="photogrammetry-enabled"
+                    type="checkbox"
+                    checked={photogrammetry}
+                    onChange={(event) => onPhotogrammetryChange(event.target.checked)}
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-[#ffbe00]"
+                  />
+                </label>
+                <div>
+                  <label className={FIELD_LABEL} htmlFor="cesium-ion-token">
+                    Token de acceso de Cesium ion
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="cesium-ion-token"
+                      type="password"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={tilesKey}
+                      placeholder="eyJhbGciOi…"
+                      onChange={(event) => {
+                        setTilesKey(event.target.value)
+                        setKeySaved(false)
+                      }}
+                      className={SELECT_CLASS}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCesiumIonToken(tilesKey)
+                        setTilesKey(cesiumIonToken())
+                        setKeySaved(true)
+                      }}
+                      className="shrink-0 rounded border border-accent/40 bg-accent/10 px-3 text-[11px] font-semibold text-accent transition hover:bg-accent/20"
+                    >
+                      Guardar
+                    </button>
+                  </div>
+                  <p className="mt-1 text-[10px] leading-snug text-white/30">
+                    {keySaved
+                      ? 'Token guardado en este navegador. Abre la Vista 3D para aplicarlo.'
+                      : maskedIonToken()
+                        ? `Guardado en este navegador: ${maskedIonToken()}.`
+                        : 'Se guarda solo en este navegador (localStorage); no viaja al repositorio.'}
+                  </p>
+                  <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[10px] leading-snug text-white/30">
+                    <li>
+                      Crea una cuenta gratis en{' '}
+                      <a
+                        href="https://ion.cesium.com/signup"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-accent/80 underline decoration-dotted"
+                      >
+                        ion.cesium.com
+                      </a>{' '}
+                      (sin tarjeta).
+                    </li>
+                    <li>
+                      En el{' '}
+                      <a
+                        href={CESIUM_ION_ASSET_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-accent/80 underline decoration-dotted"
+                      >
+                        Asset Depot
+                      </a>{' '}
+                      añade «Google Photorealistic 3D Tiles» a <em>My Assets</em>.
+                    </li>
+                    <li>
+                      En{' '}
+                      <a
+                        href={CESIUM_ION_CONSOLE_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-accent/80 underline decoration-dotted"
+                      >
+                        Access Tokens
+                      </a>{' '}
+                      crea un token con permiso <code className="text-white/50">assets:read</code> y
+                      pégalo aquí.
+                    </li>
+                  </ol>
+                  <p className="mt-1 text-[10px] leading-snug text-white/30">
+                    Plan Community: gratuito y sin prepago, 1.000 peticiones del tileset raíz al
+                    mes. Este visor solo pide la raíz al abrir y al alejarse 40 km, así que cabe de
+                    sobra. Uso personal/no comercial.
+                  </p>
                 </div>
               </section>
 
