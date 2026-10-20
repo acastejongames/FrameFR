@@ -20,7 +20,6 @@ import {
   type PerformanceSettings,
 } from '@/data/quality'
 import {
-  GOOGLE_TILES_URL,
   googleTilesKey,
   maskedTilesKey,
   setGoogleTilesKey,
@@ -558,16 +557,17 @@ export function SettingsModal({
                         : 'Se guarda solo en este navegador (localStorage); no viaja al repositorio.'}
                   </p>
                   <p className="mt-1 text-[10px] leading-snug text-white/30">
-                    Google exige una cuenta de facturación y la API «Map Tiles» activada en{' '}
+                    Requiere una cuenta de facturación y la API «Map Tiles» activada. Crea la clave
+                    en{' '}
                     <a
                       href="https://console.cloud.google.com/google/maps-apis/credentials"
                       target="_blank"
                       rel="noreferrer"
                       className="text-accent/80 underline decoration-dotted"
                     >
-                      Google Cloud
+                      Google Cloud Console
                     </a>
-                    . El endpoint es <span className="text-white/50">{GOOGLE_TILES_URL}</span>.
+                    .
                   </p>
                 </div>
               </section>
