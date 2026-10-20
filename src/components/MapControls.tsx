@@ -18,6 +18,7 @@ import type { Map } from 'maplibre-gl'
 import { BASEMAPS, type BasemapId, type BasemapLayerVisibility } from '@/map/style'
 import { ToolPopover } from './ToolPopover'
 import { WeatherPanel } from './WeatherPanel'
+import { AtcRadioPanel } from './AtcRadioPanel'
 
 interface MapControlsProps {
   map: Map | null
@@ -53,7 +54,7 @@ export function MapControls({
   onLocate,
   visible,
 }: MapControlsProps) {
-  const [panel, setPanel] = useState<'map' | 'weather' | null>(null)
+  const [panel, setPanel] = useState<'map' | 'weather' | 'radio' | null>(null)
   const close = useCallback(() => setPanel(null), [])
   // Keep weather mounted when the toolbar is hidden: hiding UI must not disable a layer.
   return (
@@ -129,6 +130,11 @@ export function MapControls({
         map={map}
         open={panel === 'weather'}
         onToggle={() => setPanel(panel === 'weather' ? null : 'weather')}
+        onClose={close}
+      />
+      <AtcRadioPanel
+        open={panel === 'radio'}
+        onToggle={() => setPanel(panel === 'radio' ? null : 'radio')}
         onClose={close}
       />
       <span className="dock-divider" />
