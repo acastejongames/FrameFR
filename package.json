@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build && node scripts/postbuild.mjs && node scripts/check-worker.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --force",
+    "audio-lab": "vite build --config scripts/audio-lab.config.ts --logLevel error && node dist-audio-lab/audio-lab.js",
     "smoke": "vite build --config smoke.config.ts --logLevel error && node dist-smoke/smoke.js",
     "check:render": "vite build --config scripts/render.config.ts --logLevel error && node dist-render/render-check.js",
     "test": "npm run smoke && npm run check:render",

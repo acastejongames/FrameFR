@@ -1,3 +1,5 @@
+import { AtcCleanup, type CleanupLevel } from './atc-cleanup'
+
 export type RadioPlaybackPhase =
   | 'idle'
   | 'connecting'
@@ -119,11 +121,22 @@ class PcmOutput {
   private writeIndex = 0
   private length = 0
   private fraction = 0
+  private cleanup: AtcCleanup | null = null
+  private cleanupLevel: CleanupLevel
   inputRate: number
 
-  constructor(inputRate: number) {
+  constructor(inputRate: number, cleanupLevel: CleanupLevel = 'off') {
     this.inputRate = inputRate
     this.buffer = new Float32Array(inputRate * 8)
+    this.cleanupLevel = cleanupLevel
+  }
+
+  /** Cambia (o desactiva) la limpieza sin reiniciar el reproductor. */
+  setCleanupLevel(level: CleanupLevel): void {
+    const wasOff = this.cleanupLevel === 'off'
+    this.cleanupLevel = level
+    if (wasOff && level !== 'off') this.cleanup?.reset()
+    this.cleanup?.setLevel(level)
   }
 
   push(samples: Int16Array): void {
@@ -155,6 +168,12 @@ class PcmOutput {
         this.fraction -= 1
       }
     }
+    // El limpiador trabaja sobre la señal ya remuestreada, que es la que oye
+    // el usuario: así el ruido de imagen del receptor también se atenúa.
+    // Se crea siempre (aunque esté en «off») para que activarlo en caliente no
+    // deje los primeros muestras en silencio.
+    if (!this.cleanup) this.cleanup = new AtcCleanup(outputRate, this.cleanupLevel)
+    this.cleanup.process(output)
   }
 }
 
@@ -207,7 +226,14 @@ export class OpenWebRxAudioClient {
     private readonly receiverUrl: string,
     private readonly frequencyHz: number,
     private readonly onState: StateHandler,
+    private cleanupLevel: CleanupLevel = 'off',
   ) {}
+
+  /** Cambia el reductor de ruido al vuelo, sin cortar el audio. */
+  setCleanup(level: CleanupLevel): void {
+    this.cleanupLevel = level
+    this.output?.setCleanupLevel(level)
+  }
 
   async start(): Promise<void> {
     this.emit('connecting', 'Conectando al audio del receptor…')
@@ -222,7 +248,7 @@ export class OpenWebRxAudioClient {
       this.audioRate = chooseRate(context.sampleRate, 8000, 12000)
       this.hdAudioRate = chooseRate(context.sampleRate, 36000, 48000)
       if (this.hdAudioRate < 36000) this.hdAudioRate = context.sampleRate
-      this.output = new PcmOutput(this.audioRate)
+      this.output = new PcmOutput(this.audioRate, this.cleanupLevel)
 
       await context.resume()
       if (this.stopped) return

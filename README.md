@@ -161,6 +161,7 @@ completa con:
 - **Navegación 3D manual:** mantén pulsado el botón central/rueda del ratón y
   mueve el puntero para girar e inclinar; el botón derecho ya no rota el mapa.
 - **Radio ATC solo audio:** el dock conecta directamente con el WebSocket de OpenWebRX+ y decodifica AM en el navegador, sin interfaz ni waterfall. Lee los perfiles anunciados por el receptor y, si el actual no incluye la frecuencia solicitada, selecciona el perfil compatible antes de iniciar DSP. En SDR Alaró, las frecuencias 118–120 MHz se asignan a **SDR-B · Banda Aérea 118–120 MHz**; seleccionar el perfil puede cambiar la sintonía compartida del receptor. Más información: [manual de OpenWebRX+](https://fms.komkon.org/OWRX/) y [protocolo oficial de perfiles](https://github.com/luarvique/openwebrx/blob/master/owrx/connection.py).
+- **Reductor de ruido ATC:** el selector del panel filtra el siseo del receptor en **Sin filtrar / Suave / Clara / Máxima** (por defecto *Clara*) y se recuerda entre sesiones. Trabaja en el navegador sobre la señal ya remuestreada: paso alto para el retumbe, paso bajo para el siseo agudo y un reductor espectral que solo baja donde no hay voz. **No cambia el volumen ni el timbre de la voz**, no recorta sílabas y no añade bombeo; el modo «Sin filtrar» es un bypass exacto. Detalle y banco de pruebas: `npm run audio-lab`.
 - **Ajustes:** cuatro pestañas —**General** (actualizaciones en segundo plano,
   límite de aeronaves y orden), **Interfaz** (tamaño ×0.9/×1/×1.25, elementos
   visibles incluida la brújula, etiquetas y estilo), **Telemetría** (proveedor

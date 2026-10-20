@@ -5,6 +5,12 @@ import { sampleGrid, rasterizeForecast } from '../src/data/weather/raster'
 import { FleetController, shouldCollectInBackground } from '../src/engine/fleetController'
 import { normalizeGuiVisibility, normalizeInterfaceScale } from '../src/config'
 import {
+  AtcCleanup,
+  isCleanupLevel,
+  loadCleanupLevel,
+  type CleanupLevel,
+} from '../src/lib/atc-cleanup'
+import {
   headingToRotationY,
   matchAircraft3D,
   modelAltitudeY,
@@ -714,6 +720,77 @@ console.log('· Interpolación de movimiento del visor 3D…')
   sampler.push({ ...last, lat: 45 })
   const afterJump = sampler.stateAt(2000)
   check((afterJump?.lat ?? 0) > 44.9, 'movimiento: el teletransporte reinicia la pista')
+}
+
+console.log('· Limpieza de audio ATC…')
+{
+  const rate = 48000
+  const total = rate * 3
+  const voice = new Float32Array(total)
+  const noise = new Float32Array(total)
+  let seed = 12345
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0
+    return seed / 4294967296 - 0.5
+  }
+  for (let i = 0; i < total; i += 1) {
+    const t = i / rate
+    const env = t < 0.9 ? Math.min(1, t / 0.02, (0.9 - t) / 0.03) : 0
+    voice[i] =
+      env *
+      (0.25 * Math.sin(2 * Math.PI * 180 * t) +
+        0.12 * Math.sin(2 * Math.PI * 700 * t) +
+        0.06 * Math.sin(2 * Math.PI * 1600 * t))
+    noise[i] = random() * 0.06
+  }
+  const noisy = new Float32Array(total)
+  for (let i = 0; i < total; i += 1) noisy[i] = voice[i] + noise[i]
+
+  const runCleanup = (level: CleanupLevel) => {
+    const cleaner = new AtcCleanup(rate, level)
+    const out = new Float32Array(noisy)
+    for (let offset = 0; offset < out.length; offset += 4096) {
+      cleaner.process(out.subarray(offset, Math.min(offset + 4096, out.length)))
+    }
+    return out
+  }
+
+  const bypass = runCleanup('off')
+  let bypassDiff = 0
+  for (let i = 0; i < total; i += 1) bypassDiff = Math.max(bypassDiff, Math.abs(bypass[i] - noisy[i]))
+  check(bypassDiff === 0, 'limpieza: «Sin filtrar» es un bypass bit a bit')
+
+  const cleaned = runCleanup('clara')
+  let lengthOk = cleaned.length === total
+  let finite = true
+  let peak = 0
+  for (let i = 0; i < total; i += 1) {
+    if (!Number.isFinite(cleaned[i])) finite = false
+    peak = Math.max(peak, Math.abs(cleaned[i]))
+  }
+  lengthOk = lengthOk && finite
+  check(lengthOk, 'limpieza: la salida tiene la misma longitud y ningún NaN')
+  check(peak <= 1, 'limpieza: la salida nunca supera el fondo de escala')
+
+  const level = (data: Float32Array, from: number, to: number) => {
+    let sum = 0
+    for (let i = from; i < to; i += 1) sum += data[i] * data[i]
+    return Math.sqrt(sum / (to - from))
+  }
+  const pauseBefore = level(noisy, Math.round(1.2 * rate), Math.round(2.8 * rate))
+  const pauseAfter = level(cleaned, Math.round(1.2 * rate), Math.round(2.8 * rate))
+  const pauseDb = 20 * Math.log10(pauseBefore / Math.max(pauseAfter, 1e-9))
+  check(pauseDb > 10, `limpieza: el ruido de las pausas baja ${pauseDb.toFixed(1)} dB`)
+
+  const voiceBefore = level(noisy, Math.round(0.15 * rate), Math.round(0.85 * rate))
+  const voiceAfter = level(cleaned, Math.round(0.15 * rate), Math.round(0.85 * rate))
+  const voiceDb = 20 * Math.log10(voiceAfter / voiceBefore)
+  check(Math.abs(voiceDb) < 1, `limpieza: la voz conserva su nivel (${voiceDb.toFixed(2)} dB)`)
+
+  check(
+    isCleanupLevel('clara') && !isCleanupLevel('turbo') && isCleanupLevel(loadCleanupLevel()),
+    'limpieza: los niveles se validan y el guardado tiene un valor por defecto',
+  )
 }
 
 if (failures > 0) {

@@ -1,3 +1,31 @@
+## Reductor de ruido para la radio ATC — 2026-10-20
+
+- El panel **Radio ATC** estrena un selector de limpieza con cuatro niveles:
+  **Sin filtrar**, **Suave** (quita el siseo sin tocar el timbre), **Clara**
+  (equilibrio recomendado, activo por defecto) y **Máxima** (lo deja más
+  seco). El ajuste se guarda en el navegador y se aplica al vuelo, sin cortar
+  el audio, incluso con una frecuencia ya sonando.
+- La prioridad es **no perder calidad**, así que la cadena no lleva AGC ni
+  puerta: no cambia el volumen de la voz ni abre huecos entre sílabas. Hace
+  paso alto (retumbe), paso bajo (siseo agudo e imagen del remuestreo) y un
+  reductor espectral por bin con decisión dirigida, suelo de atenuación
+  (−10/−18/−26 dB) y suavizado en frecuencia y tiempo (subida de 6 ms,
+  bajada de 40 ms) para que no haya «ruido musical» ni bombeo.
+- El ruido se estima con **estadística de mínimos** sobre ~1,2 s: solo se
+  aprende en las pausas, así que mientras hay voz la estimación queda
+  congelada. Si no hay pausas, el peor caso es limpiar menos, nunca comerse
+  la voz. El arranque se ceba con el primer mínimo para no atenuar la primera
+  transmisión.
+- Medido con voz sintética y ruido de receptor (SNR 22,8 dB): el ruido de las
+  pausas baja **15,6 dB** en *Clara*, la voz conserva su nivel (**−0,09 dB**),
+  el timbre varía **0,16 dB** por banda entre 300 y 3400 Hz y no hay recortes.
+  Con SNR 13 dB la voz sigue en −0,2 dB y el timbre en 0,5 dB.
+- «Sin filtrar» es un **bypass bit a bit** y la latencia añadida es de 513
+  muestras (~10,7 ms a 48 kHz), imperceptible al escuchar.
+- `npm run audio-lab` mide reducción en pausas, nivel y timbre de la voz,
+  bombeo, ataques, latencia y comportamiento con un heterodino; `npm run
+  smoke` comprueba el bypass, la longitud, los recortes y el nivel.
+
 ## Fotogrametría 3D gratis con Cesium ion — 2026-10-20
 
 - El visor puede mostrar **terreno y edificios reales en 3D**, como Google

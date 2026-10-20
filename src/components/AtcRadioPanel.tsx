@@ -5,6 +5,12 @@ import {
   OpenWebRxAudioClient,
   type RadioPlaybackState,
 } from '@/lib/openwebrx-audio'
+import {
+  CLEANUP_LEVELS,
+  loadCleanupLevel,
+  saveCleanupLevel,
+  type CleanupLevel,
+} from '@/lib/atc-cleanup'
 
 const ALARO_URL = 'https://sdr.alaro.ovh/'
 
@@ -49,6 +55,7 @@ export function AtcRadioPanel({
   const [receiver, setReceiver] = useState<'alaro' | 'custom'>('alaro')
   const [customUrl, setCustomUrl] = useState('')
   const [frequency, setFrequency] = useState('118.455')
+  const [cleanup, setCleanup] = useState<CleanupLevel>(() => loadCleanupLevel())
   const [playback, setPlayback] = useState<RadioPlaybackState>(IDLE_PLAYBACK)
   const audioClientRef = useRef<OpenWebRxAudioClient | null>(null)
 
@@ -66,9 +73,15 @@ export function AtcRadioPanel({
     event.preventDefault()
     if (!tunedUrl || !frequencyHz) return
     audioClientRef.current?.stop(true)
-    const client = new OpenWebRxAudioClient(receiverUrl, frequencyHz, setPlayback)
+    const client = new OpenWebRxAudioClient(receiverUrl, frequencyHz, setPlayback, cleanup)
     audioClientRef.current = client
     void client.start()
+  }
+
+  const changeCleanup = (level: CleanupLevel) => {
+    setCleanup(level)
+    saveCleanupLevel(level)
+    audioClientRef.current?.setCleanup(level)
   }
 
   const stop = () => {
@@ -154,6 +167,26 @@ export function AtcRadioPanel({
             ))}
           </datalist>
           <small id="radio-frequency-hint">Banda aérea VHF: 118–136.975 MHz. El reproductor busca y selecciona automáticamente un perfil SDR que incluya la frecuencia.</small>
+        </div>
+
+        <div className="radio-field">
+          <label htmlFor="radio-cleanup">Reductor de ruido</label>
+          <select
+            id="radio-cleanup"
+            value={cleanup}
+            aria-describedby="radio-cleanup-hint"
+            onChange={(event) => changeCleanup(event.target.value as CleanupLevel)}
+          >
+            {CLEANUP_LEVELS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <small id="radio-cleanup-hint">
+            {CLEANUP_LEVELS.find((option) => option.value === cleanup)?.hint}
+            {cleanup !== 'off' && ' No cambia el volumen de la voz.'}
+          </small>
         </div>
 
         <div className="radio-channels" aria-label="Frecuencias rápidas de Palma">
