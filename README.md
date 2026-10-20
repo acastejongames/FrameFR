@@ -160,7 +160,7 @@ completa con:
   restablece el norte al pulsarla sin cambiar centro, zoom ni inclinación.
 - **Navegación 3D manual:** mantén pulsado el botón central/rueda del ratón y
   mueve el puntero para girar e inclinar; el botón derecho ya no rota el mapa.
-- **Radio ATC solo audio:** el dock conecta directamente con el WebSocket de OpenWebRX+ y decodifica el audio AM en el navegador, sin insertar su interfaz ni el waterfall. Comprueba que la frecuencia esté dentro del perfil SDR antes de iniciar DSP. SDR Alaró publica antenas de 144–430 MHz, por lo que su cobertura ATC en 118–136.975 MHz no está garantizada; véase la [ficha del receptor](https://sdr.alaro.ovh/) y el [manual de OpenWebRX+](https://fms.komkon.org/OWRX/).
+- **Radio ATC solo audio:** el dock conecta directamente con el WebSocket de OpenWebRX+ y decodifica AM en el navegador, sin interfaz ni waterfall. Al sintonizar fuera del perfil activo, solicita `setfrequency` para recentrar el SDR solo si el servidor permite `allow_center_freq_changes`; después inicia DSP al recibir la nueva configuración. El recentrado puede cambiar la recepción compartida del SDR. La recepción en 118–136.975 MHz no se limita por la antena publicada. Más información: [manual de OpenWebRX+](https://fms.komkon.org/OWRX/) y [implementación oficial de setfrequency](https://github.com/luarvique/openwebrx/blob/master/owrx/connection.py).
 - **Ajustes:** cuatro pestañas —**General** (actualizaciones en segundo plano,
   límite de aeronaves y orden), **Interfaz** (tamaño ×0.9/×1/×1.25, elementos
   visibles incluida la brújula, etiquetas y estilo), **Telemetría** (proveedor

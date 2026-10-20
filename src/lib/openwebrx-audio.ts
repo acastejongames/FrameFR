@@ -155,6 +155,8 @@ export class OpenWebRxAudioClient {
   private processor: ScriptProcessorNode | null = null
   private output: PcmOutput | null = null
   private timeout: number | null = null
+  private retuneTimeout: number | null = null
+  private retuneRequested = false
   private stopped = false
   private terminal = false
   private started = false
@@ -232,6 +234,7 @@ export class OpenWebRxAudioClient {
     if (this.stopped) return
     this.stopped = true
     this.clearTimeout()
+    this.clearRetuneTimeout()
     this.socket?.close()
     this.socket = null
     this.releaseAudio()
@@ -265,14 +268,33 @@ export class OpenWebRxAudioClient {
     const minimum = center - bandwidth / 2
     const maximum = center + bandwidth / 2
     if (this.frequencyHz < minimum || this.frequencyHz > maximum) {
-      this.fail(
-        'out-of-band',
-        'El perfil activo cubre ' + formatMHz(minimum) + '–' + formatMHz(maximum) +
-          ' MHz; ' + formatMHz(this.frequencyHz) + ' MHz queda fuera. No se cambia el perfil compartido.',
-      )
+      if (this.config.allow_center_freq_changes === true) {
+        if (!this.retuneRequested) {
+          this.retuneRequested = true
+          this.emit('tuning', 'Solicitando recentrar el SDR en ' + formatMHz(this.frequencyHz) + ' MHz…')
+          this.socket.send(JSON.stringify({
+            type: 'setfrequency',
+            params: { frequency: this.frequencyHz },
+          }))
+          this.retuneTimeout = window.setTimeout(() => {
+            this.fail(
+              'out-of-band',
+              'OpenWebRX+ no recentró el SDR. El servidor puede bloquear este cambio o requerir una clave.',
+            )
+          }, 10000)
+        }
+      } else {
+        this.fail(
+          'out-of-band',
+          'El perfil activo cubre ' + formatMHz(minimum) + '–' + formatMHz(maximum) +
+            ' MHz y el servidor no permite recentrar desde el reproductor.',
+        )
+      }
       return
     }
 
+    this.clearRetuneTimeout()
+    this.retuneRequested = false
     this.compression = this.config.audio_compression === 'adpcm' ? 'adpcm' : 'none'
     this.socket.send(JSON.stringify({
       type: 'dspcontrol',
@@ -322,6 +344,7 @@ export class OpenWebRxAudioClient {
     if (this.terminal || this.stopped) return
     this.terminal = true
     this.clearTimeout()
+    this.clearRetuneTimeout()
     this.releaseAudio()
     this.onState({ phase, message })
     this.socket?.close()
@@ -339,6 +362,13 @@ export class OpenWebRxAudioClient {
     if (this.timeout !== null) {
       window.clearTimeout(this.timeout)
       this.timeout = null
+    }
+  }
+
+  private clearRetuneTimeout(): void {
+    if (this.retuneTimeout !== null) {
+      window.clearTimeout(this.retuneTimeout)
+      this.retuneTimeout = null
     }
   }
 
