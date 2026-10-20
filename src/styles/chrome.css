@@ -834,7 +834,7 @@ body.ui-clean-mode .ui-overlay { visibility: hidden !important; pointer-events: 
 }
 
 
-/* OpenWebRX+ panel: defer the external receiver iframe until the user asks. */
+/* Audio directo de OpenWebRX+: controles compactos sin cargar su interfaz. */
 .radio-form {
   display: grid;
   gap: 13px;
@@ -888,6 +888,7 @@ body.ui-clean-mode .ui-overlay { visibility: hidden !important; pointer-events: 
 .radio-field > small {
   color: #7f8c9c;
   font-size: 10px;
+  line-height: 1.4;
 }
 .radio-channels {
   display: grid;
@@ -973,6 +974,10 @@ body.ui-clean-mode .ui-overlay { visibility: hidden !important; pointer-events: 
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  background: #f5aa42;
+  box-shadow: 0 0 8px #f5aa4280;
+}
+.radio-active-dot[data-state='playing'] {
   background: #34d399;
   box-shadow: 0 0 8px #34d39980;
 }
@@ -984,19 +989,14 @@ body.ui-clean-mode .ui-overlay { visibility: hidden !important; pointer-events: 
   font-size: 10px;
   line-height: 1.5;
 }
-.radio-frame {
-  margin-top: 12px;
-  overflow: hidden;
-  border: 1px solid #ffffff16;
-  border-radius: 10px;
-  background: #080b0f;
+.radio-status[data-state='playing'] {
+  border-color: #34d399;
 }
-.radio-frame iframe {
-  display: block;
-  width: 100%;
-  height: 310px;
-  border: 0;
-  background: #080b0f;
+.radio-status[data-state='out-of-band'],
+.radio-status[data-state='unavailable'],
+.radio-status[data-state='error'] {
+  border-color: #ff7979;
+  color: #ffc0c0;
 }
 .radio-note {
   margin-top: 14px;
@@ -1012,9 +1012,4 @@ body.ui-clean-mode .ui-overlay { visibility: hidden !important; pointer-events: 
 }
 .radio-links a {
   color: #aab5c3;
-}
-@container (max-width: 380px) {
-  .radio-frame iframe {
-    height: 270px;
-  }
 }

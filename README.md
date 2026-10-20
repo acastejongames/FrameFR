@@ -160,7 +160,7 @@ completa con:
   restablece el norte al pulsarla sin cambiar centro, zoom ni inclinación.
 - **Navegación 3D manual:** mantén pulsado el botón central/rueda del ratón y
   mueve el puntero para girar e inclinar; el botón derecho ya no rota el mapa.
-- **Radio ATC en el dock:** carga SDR Alaró (o una URL OpenWebRX+ personalizada), selecciona frecuencias de Palma y mantén el radar abierto. La vista del receptor se crea solo al pedirla; OpenWebRX lee la frecuencia del fragmento `#freq=<Hz>,mod=am` y la sintonía depende del perfil permitido por el servidor.
+- **Radio ATC solo audio:** el dock conecta directamente con el WebSocket de OpenWebRX+ y decodifica el audio AM en el navegador, sin insertar su interfaz ni el waterfall. Comprueba que la frecuencia esté dentro del perfil SDR antes de iniciar DSP. SDR Alaró publica antenas de 144–430 MHz, por lo que su cobertura ATC en 118–136.975 MHz no está garantizada; véase la [ficha del receptor](https://sdr.alaro.ovh/) y el [manual de OpenWebRX+](https://fms.komkon.org/OWRX/).
 - **Ajustes:** cuatro pestañas —**General** (actualizaciones en segundo plano,
   límite de aeronaves y orden), **Interfaz** (tamaño ×0.9/×1/×1.25, elementos
   visibles incluida la brújula, etiquetas y estilo), **Telemetría** (proveedor

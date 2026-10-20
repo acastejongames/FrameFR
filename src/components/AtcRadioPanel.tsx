@@ -1,6 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ExternalLink, Radio } from 'lucide-react'
 import { ToolPopover } from './ToolPopover'
+import {
+  OpenWebRxAudioClient,
+  type RadioPlaybackState,
+} from '@/lib/openwebrx-audio'
 
 const ALARO_URL = 'https://sdr.alaro.ovh/'
 
@@ -31,6 +35,8 @@ function openWebRxUrl(base: string, frequencyHz: number): string | null {
   }
 }
 
+const IDLE_PLAYBACK: RadioPlaybackState = { phase: 'idle', message: '' }
+
 export function AtcRadioPanel({
   open,
   onToggle,
@@ -43,22 +49,39 @@ export function AtcRadioPanel({
   const [receiver, setReceiver] = useState<'alaro' | 'custom'>('alaro')
   const [customUrl, setCustomUrl] = useState('')
   const [frequency, setFrequency] = useState('118.455')
-  const [streamUrl, setStreamUrl] = useState<string | null>(null)
+  const [playback, setPlayback] = useState<RadioPlaybackState>(IDLE_PLAYBACK)
+  const audioClientRef = useRef<OpenWebRxAudioClient | null>(null)
 
   const receiverUrl = receiver === 'alaro' ? ALARO_URL : customUrl
   const frequencyHz = toFrequencyHz(frequency)
   const tunedUrl = frequencyHz ? openWebRxUrl(receiverUrl, frequencyHz) : null
+  const isActive = playback.phase !== 'idle'
+
+  useEffect(() => () => {
+    audioClientRef.current?.stop(true)
+    audioClientRef.current = null
+  }, [])
 
   const tune = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (tunedUrl) setStreamUrl(tunedUrl)
+    if (!tunedUrl || !frequencyHz) return
+    audioClientRef.current?.stop(true)
+    const client = new OpenWebRxAudioClient(receiverUrl, frequencyHz, setPlayback)
+    audioClientRef.current = client
+    void client.start()
+  }
+
+  const stop = () => {
+    audioClientRef.current?.stop()
+    audioClientRef.current = null
+    setPlayback(IDLE_PLAYBACK)
   }
 
   return (
     <ToolPopover
       id="atc-radio"
       title="Radio ATC"
-      subtitle="Carga un receptor OpenWebRX+ sin salir del radar"
+      subtitle="Audio directo de OpenWebRX+, sin waterfall ni ventana del receptor"
       open={open}
       onClose={onClose}
       trigger={
@@ -76,7 +99,7 @@ export function AtcRadioPanel({
         >
           <Radio size={20} />
           <span>Radio</span>
-          {streamUrl && <span className="radio-active-dot" aria-hidden="true" />}
+          {isActive && <span className="radio-active-dot" data-state={playback.phase} aria-hidden="true" />}
         </button>
       }
     >
@@ -95,7 +118,7 @@ export function AtcRadioPanel({
 
         {receiver === 'custom' && (
           <div className="radio-field">
-            <label htmlFor="radio-url">URL HTTPS de OpenWebRX</label>
+            <label htmlFor="radio-url">URL HTTPS de OpenWebRX+</label>
             <input
               id="radio-url"
               type="url"
@@ -130,7 +153,7 @@ export function AtcRadioPanel({
               <option key={channel.value} value={channel.value} label={channel.label} />
             ))}
           </datalist>
-          <small id="radio-frequency-hint">Banda aérea VHF: 118–136.975 MHz.</small>
+          <small id="radio-frequency-hint">Banda aérea VHF: 118–136.975 MHz. El perfil SDR debe cubrir la frecuencia.</small>
         </div>
 
         <div className="radio-channels" aria-label="Frecuencias rápidas de Palma">
@@ -150,14 +173,10 @@ export function AtcRadioPanel({
 
         <div className="radio-actions">
           <button type="submit" className="radio-load" disabled={!tunedUrl}>
-            {streamUrl ? 'Sintonizar' : 'Cargar receptor'}
+            {isActive ? 'Sintonizar' : 'Escuchar'}
           </button>
-          {streamUrl && (
-            <button
-              type="button"
-              className="radio-stop"
-              onClick={() => setStreamUrl(null)}
-            >
+          {isActive && (
+            <button type="button" className="radio-stop" onClick={stop}>
               Detener
             </button>
           )}
@@ -167,39 +186,28 @@ export function AtcRadioPanel({
               href={tunedUrl}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Abrir la frecuencia en OpenWebRX en otra pestaña"
+              aria-label="Abrir esta frecuencia en el sitio OpenWebRX+"
             >
               <ExternalLink size={14} />
-              Abrir aparte
+              Abrir OpenWebRX+
             </a>
           )}
         </div>
       </form>
 
-      {streamUrl && (
-        <>
-          <div className="radio-status" role="status" aria-live="polite">
-            Receptor cargado. Pulsa “Start OpenWebRX+” dentro del panel para iniciar el audio.
-          </div>
-          <div className="radio-frame">
-            <iframe
-              key={streamUrl}
-              src={streamUrl}
-              title="Receptor OpenWebRX+"
-              loading="lazy"
-              allow="autoplay"
-            />
-          </div>
-        </>
+      {isActive && (
+        <div className="radio-status" data-state={playback.phase} role="status" aria-live="polite">
+          {playback.message}
+        </div>
       )}
 
       {receiver === 'alaro' ? (
         <p className="radio-note">
-          La recepción depende de que el receptor y su perfil estén disponibles. La ficha pública de Alaró enumera antenas de 144–430 MHz; la banda aérea queda fuera de ese rango publicado.
+          La ficha de Alaró publica antenas Diamond X-300 para 144–430 MHz. La banda aérea (118–136.975 MHz) queda fuera de ese rango especificado; el receptor puede no recibirla aunque el servicio esté activo.
         </p>
       ) : (
         <p className="radio-note">
-          La sintonía depende de que el perfil del servidor cubra esta frecuencia. Si el receptor no permite insertar su página, usa “Abrir aparte”.
+          El audio llega por WebSocket. La frecuencia se valida contra el perfil activo y el reproductor no cambia perfiles SDR compartidos.
         </p>
       )}
       <div className="radio-links">
@@ -207,7 +215,7 @@ export function AtcRadioPanel({
           Frecuencias en AIP ENAIRE
         </a>
         <a href="https://fms.komkon.org/OWRX/" target="_blank" rel="noopener noreferrer">
-          Cómo funciona OpenWebRX+
+          Manual OpenWebRX+
         </a>
       </div>
     </ToolPopover>
