@@ -145,7 +145,10 @@ completa con:
   `VITE_GOOGLE_3D_TILES_KEY`) y **solo se guarda en este navegador**. Sin
   clave, o si Google la rechaza, el visor mantiene el satélite + relieve y lo
   explica en el propio control: la capa es siempre opcional y nunca rompe la
-  vista. El renderizador de teselas se carga en un chunk aparte al activarla,
+  vista. Google factura por **consulta del tileset raíz** (1.000 gratis al mes
+  y 6 USD por cada 1.000 extra); las peticiones de teselas que hace el
+  renderizador no consumen esa cuota, y este proyecto solo pide la raíz al
+  abrir el visor y al re-anclar cada 40 km. El renderizador de teselas se carga en un chunk aparte al activarla,
   las teselas se re-anclan cuando el avión se aleja 40 km y su densidad
   (error objetivo y profundidad máxima) acompaña a la calidad de malla
   elegida para no cargar de más los equipos modestos.

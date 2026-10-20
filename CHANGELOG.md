@@ -10,7 +10,9 @@
   falta. Ningún fallo de red puede dejar el visor en negro ni en «cargando».
 - La clave se guarda **solo en este navegador** (`localStorage`), enmascarada
   en los ajustes; también puede fijarse en el build con
-  `VITE_GOOGLE_3D_TILES_KEY`.
+  `VITE_GOOGLE_3D_TILES_KEY`. Google factura por tileset raíz (1.000 gratis
+  al mes; 6 USD por cada 1.000 adicionales) y las teselas hijas no consumen
+  cuota: la capa solo pide la raíz al abrir y al re-anclar cada 40 km.
 - El renderizador de teselas (`3d-tiles-renderer`) se carga en un **chunk
   perezoso** de 1,4 kB + sus dependencias solo al activar la capa: el arranque
   de la aplicación no paga su coste.
