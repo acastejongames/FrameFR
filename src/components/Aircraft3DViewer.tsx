@@ -1,15 +1,33 @@
-import { Orbit, X } from 'lucide-react'
+import { Orbit, SlidersHorizontal, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import {
   headingToRotationY,
   modelAltitudeY,
   modelScaleFor,
   type Aircraft3DModel,
 } from '@/data/aircraft3d'
+import { buildAircraftObject } from '@/data/aircraft3dModels'
+import {
+  DEFAULT_PERFORMANCE,
+  GROUND_TILE_PX,
+  MESH_SEGMENTS,
+  MIN_AUTO_RATIO,
+  QUALITY_LABELS,
+  QUALITY_TIERS,
+  RENDER_RESOLUTIONS,
+  RESOLUTION_LABELS,
+  TERRAIN_STRIDE,
+  TEXTURE_ANISOTROPY,
+  isPerformanceSettings,
+  normalizePerformance,
+  viewerPixelRatio,
+  type PerformanceSettings,
+  type QualityTier,
+  type RenderResolution,
+} from '@/data/quality'
 import {
   fetchGroundPatch,
   fetchTerrainPatch,
@@ -33,12 +51,13 @@ interface Aircraft3DViewerProps {
 const SKY_TOP = '#2e5f96'
 const SKY_HORIZON = '#d4e4f0'
 const GROUND_BG = 0x0d1218
-/** Terrain mesh resolution (vertices per side). */
-const MESH_SEGMENTS = 256
 /** Minimum drift before the ground patch re-centres, meters (scales with the window). */
 const REFRESH_DRIFT_M = 2_000
 /** Orbit damping time constant, seconds (applied per frame, frame-rate independent). */
 const DAMPING_TAU_S = 0.22
+/** Resolution governor: measurement window and warm-up before adapting. */
+const ADAPT_WINDOW_MS = 2_000
+const ADAPT_WARMUP_MS = 4_000
 
 interface SceneState {
   renderer: THREE.WebGLRenderer
@@ -67,6 +86,23 @@ interface SceneState {
   /** Render distance multiplier (1–5) of the current patch. */
   range: number
   lastFrameAt: number
+  /** Currently installed aircraft object (quality rebuilds replace it). */
+  modelObject: THREE.Object3D | null
+  modelDispose: (() => void) | null
+  /** Guards against a slow quality rebuild landing after a newer one. */
+  modelToken: number
+  modelReady: boolean
+  /** Quality tier the scene was built with. */
+  quality: { mesh: QualityTier; textures: QualityTier }
+  /** Ground signature (segments/tile pixels/DEM stride) of the current mesh. */
+  groundKey: string
+  /** Effective drawing-buffer scale and the mode that governs it. */
+  resolution: RenderResolution
+  pixelRatio: number
+  autoScale: number
+  perf: { frames: number; since: number; low: number; high: number; warmupUntil: number }
+  /** Re-applies persisted quality settings to the live scene. */
+  applyQuality: () => void
 }
 
 /**
@@ -94,6 +130,31 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
   const rangeRef = useRef(range)
   rangeRef.current = range
 
+  // Shared with Settings › Rendimiento; both stay live through the persistent
+  // state broadcaster, so changing quality in either place updates the scene.
+  const [performance, setPerformance] = usePersistentState<PerformanceSettings>(
+    'performance',
+    DEFAULT_PERFORMANCE,
+    isPerformanceSettings,
+    normalizePerformance,
+  )
+  const performanceRef = useRef(performance)
+  performanceRef.current = performance
+  const [autoScale, setAutoScale] = useState(() => viewerPixelRatio(performance.resolution))
+  const [qualityOpen, setQualityOpen] = useState(false)
+  const qualityPanelRef = useRef<HTMLDivElement>(null)
+
+  // Close the quality popover when clicking anywhere else in the viewer.
+  useEffect(() => {
+    if (!qualityOpen) return
+    const onPointerDown = (event: PointerEvent): void => {
+      if (qualityPanelRef.current?.contains(event.target as Node)) return
+      setQualityOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [qualityOpen])
+
   useEffect(() => {
     const container = containerRef.current
     const canvas = canvasRef.current
@@ -112,8 +173,15 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         setGroundLoading(false)
         return
       }
-      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+      const initialQuality = performanceRef.current
+      const initialRatio = viewerPixelRatio(initialQuality.resolution)
+      // MSAA is the one renderer setting that cannot change without rebuilding
+      // the context: skip it on the low tier, where pixel ratio matters more.
+      const renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: initialQuality.mesh !== 'baja',
+      })
+      renderer.setPixelRatio(initialRatio)
       renderer.setSize(container.clientWidth, container.clientHeight, false)
       renderer.setClearColor(GROUND_BG, 1)
 
@@ -177,8 +245,20 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         nextGroundCheckAt: 0,
         range: rangeRef.current,
         lastFrameAt: 0,
+        modelObject: null,
+        modelDispose: null,
+        modelToken: 0,
+        modelReady: false,
+        quality: { mesh: initialQuality.mesh, textures: initialQuality.textures },
+        groundKey: '',
+        resolution: initialQuality.resolution,
+        pixelRatio: initialRatio,
+        autoScale: initialRatio,
+        perf: { frames: 0, since: 0, low: 0, high: 0, warmupUntil: 0 },
+        applyQuality: () => undefined,
       }
       sceneRef.current = state
+      setAutoScale(initialRatio)
 
       // Dev/test seam: browser tests read the live camera state from here to
       // assert the camera stays where the user put it across telemetry ticks.
@@ -193,54 +273,133 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
             target: state?.controls.target.toArray() ?? null,
             aircraftId: liveRef.current.aircraft.id,
             modelId: liveRef.current.model.id,
+            pixelRatio: state?.renderer.getPixelRatio() ?? null,
+            triangles: state?.modelObject ? countTriangles(state.modelObject) : 0,
+            textureSize: state?.modelObject ? maxTextureSize(state.modelObject) : 0,
+            groundVertices:
+              (state?.groundObject as THREE.Mesh | null)?.geometry?.getAttribute('position')
+                ?.count ?? 0,
+            quality: state
+              ? {
+                  mesh: state.quality.mesh,
+                  textures: state.quality.textures,
+                  resolution: state.resolution,
+                }
+              : null,
+            loading: !state?.modelReady,
           }),
         }
       }
 
-      const loader = new GLTFLoader()
-      loader.load(
-        model.modelUrl,
-        (gltf) => {
-          if (state?.disposed) return
-          const object = gltf.scene
-          const box = new THREE.Box3().setFromObject(object)
-          const size = box.getSize(new THREE.Vector3())
-          const center = box.getCenter(new THREE.Vector3())
-          const scale = modelScaleFor(size.x, model.realLengthM)
-          object.position.sub(center)
-          const inner = new THREE.Group()
-          inner.add(object)
-          inner.scale.setScalar(scale)
-          pivot.add(inner)
-          if (state) {
-            state.scaledHeightM = size.y * scale
-            setLoading(false)
-            // Chase view from behind the tail at 1:1 scale.
-            const live = liveRef.current.aircraft
-            const y = modelAltitudeY(live.altitude, live.onGround, state.scaledHeightM)
-            const distance = Math.max(model.realLengthM * 2.3, 70)
-            const theta = (live.heading * Math.PI) / 180
-            state.controls.maxDistance = Math.max(6_000, y * 2.5, model.realLengthM * 60)
-            state.controls.target.set(0, y, 0)
-            state.camera.position.set(
-              -Math.sin(theta) * distance * 0.9,
-              y + distance * 0.45,
-              Math.cos(theta) * distance * 0.9,
-            )
-            state.controls.update()
+      // Builds (or rebuilds) the aircraft for the selected quality tier.
+      const loadModel = (): void => {
+        if (!state) return
+        const scene = state
+        const token = ++scene.modelToken
+        const firstLoad = !scene.modelReady
+        if (firstLoad) {
+          setLoading(true)
+          setLoadError(false)
+        }
+        void buildAircraftObject(
+          model.modelUrl,
+          scene.quality.mesh,
+          scene.quality.textures,
+          renderer.capabilities.getMaxAnisotropy(),
+        )
+          .then((prepared) => {
+            // A newer rebuild or a closed viewer wins over this result.
+            if (scene.disposed || token !== scene.modelToken) {
+              prepared.dispose()
+              return
+            }
+            if (scene.modelObject) {
+              scene.modelObject.removeFromParent()
+              scene.modelDispose?.()
+            }
+            const object = prepared.object
+            const box = new THREE.Box3().setFromObject(object)
+            const size = box.getSize(new THREE.Vector3())
+            const center = box.getCenter(new THREE.Vector3())
+            const scale = modelScaleFor(size.x, model.realLengthM)
+            object.position.sub(center)
+            const inner = new THREE.Group()
+            inner.add(object)
+            inner.scale.setScalar(scale)
+            scene.pivot.add(inner)
+            scene.modelObject = inner
+            scene.modelDispose = prepared.dispose
+            scene.scaledHeightM = size.y * scale
+            if (firstLoad) {
+              scene.modelReady = true
+              setLoading(false)
+              // Chase view from behind the tail at 1:1 scale.
+              const live = liveRef.current.aircraft
+              const y = modelAltitudeY(live.altitude, live.onGround, scene.scaledHeightM)
+              const distance = Math.max(model.realLengthM * 2.3, 70)
+              const theta = (live.heading * Math.PI) / 180
+              scene.controls.maxDistance = Math.max(6_000, y * 2.5, model.realLengthM * 60)
+              scene.controls.target.set(0, y, 0)
+              scene.camera.position.set(
+                -Math.sin(theta) * distance * 0.9,
+                y + distance * 0.45,
+                Math.cos(theta) * distance * 0.9,
+              )
+              scene.controls.update()
+            }
+          })
+          .catch(() => {
+            if (scene.disposed || token !== scene.modelToken) return
+            if (firstLoad) {
+              setLoadError(true)
+              setLoading(false)
+            }
+          })
+      }
+      loadModel()
+
+      // Live quality switch: pixel ratio is free, the model and the ground
+      // mesh are rebuilt, but the camera keeps its exact position.
+      state.applyQuality = (): void => {
+        if (!state) return
+        const scene = state
+        const next = performanceRef.current
+        const ratio = viewerPixelRatio(next.resolution)
+        if (next.resolution !== scene.resolution || ratio !== scene.pixelRatio) {
+          scene.resolution = next.resolution
+          scene.pixelRatio = ratio
+          scene.autoScale = ratio
+          scene.renderer.setPixelRatio(ratio)
+          scene.perf = {
+            frames: 0,
+            since: 0,
+            low: 0,
+            high: 0,
+            warmupUntil: window.performance.now() + ADAPT_WARMUP_MS,
           }
-        },
-        undefined,
-        () => {
-          if (state?.disposed) return
-          setLoadError(true)
-          setLoading(false)
-        },
-      )
+          setAutoScale(ratio)
+        }
+        if (next.mesh !== scene.quality.mesh || next.textures !== scene.quality.textures) {
+          scene.quality = { mesh: next.mesh, textures: next.textures }
+          scene.groundKey = ''
+          loadModel()
+        }
+      }
 
       const frame = (now: number): void => {
         if (!state || state.disposed) return
         state.raf = window.requestAnimationFrame(frame)
+
+        // A hidden tab gets no frames from the browser, but some contexts still
+        // deliver a few: skip rendering and map work entirely, and re-measure
+        // once the viewer is visible again.
+        if (typeof document !== 'undefined' && document.hidden) {
+          state.lastFrameAt = now
+          state.perf.frames = 0
+          state.perf.since = 0
+          state.perf.warmupUntil = now + ADAPT_WARMUP_MS
+          return
+        }
 
         // Feed the motion sampler once per telemetry observation; the
         // rendered state interpolates smoothly between reports.
@@ -305,7 +464,47 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         state.lastFrameAt = now
         state.controls.dampingFactor = 1 - Math.exp(-dtS / DAMPING_TAU_S)
         state.controls.update()
-        state.renderer.render(state.scene, state.camera)
+        if (container.clientWidth > 0 && container.clientHeight > 0) {
+          state.renderer.render(state.scene, state.camera)
+        }
+
+        // Automatic resolution governor: on a device that cannot hold ~30 fps,
+        // trade pixels (not features) until the camera moves fluidly again.
+        // It only ever lowers the ratio the user's mode allows, and recovers
+        // when the device proves it has headroom.
+        if (state.resolution !== 'auto' || now < state.perf.warmupUntil) return
+        if (!state.perf.since) state.perf.since = now
+        state.perf.frames += 1
+        const windowMs = now - state.perf.since
+        if (windowMs < ADAPT_WINDOW_MS) return
+        const fps = (state.perf.frames * 1000) / windowMs
+        state.perf.frames = 0
+        state.perf.since = now
+        const current = state.renderer.getPixelRatio()
+        if (fps < 28) {
+          state.perf.low += 1
+          state.perf.high = 0
+          if (state.perf.low >= 2 && current > MIN_AUTO_RATIO + 0.001) {
+            const next = Math.max(MIN_AUTO_RATIO, Math.round((current - 0.25) * 100) / 100)
+            state.renderer.setPixelRatio(next)
+            state.autoScale = next
+            state.perf.low = 0
+            setAutoScale(next)
+          }
+        } else if (fps > 55) {
+          state.perf.high += 1
+          state.perf.low = 0
+          if (state.perf.high >= 3 && current < state.pixelRatio - 0.001) {
+            const next = Math.min(state.pixelRatio, Math.round((current + 0.25) * 100) / 100)
+            state.renderer.setPixelRatio(next)
+            state.autoScale = next
+            state.perf.high = 0
+            setAutoScale(next)
+          }
+        } else {
+          state.perf.low = 0
+          state.perf.high = 0
+        }
       }
       frame(0)
 
@@ -332,18 +531,14 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         state.abort.abort()
         window.cancelAnimationFrame(state.raf)
         state.controls.dispose()
+        // Prepared aircraft own their geometries/materials; the shared base
+        // GLB stays cached for the next opening.
+        state.modelObject?.removeFromParent()
+        state.modelDispose?.()
+        state.modelObject = null
+        state.modelDispose = null
+        if (state.groundObject) disposeObject3D(state.groundObject)
         if (state.scene.background instanceof THREE.Texture) state.scene.background.dispose()
-        state.scene.traverse((node) => {
-          const mesh = node as THREE.Mesh
-          if (mesh.geometry) mesh.geometry.dispose()
-          const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
-          for (const material of materials) {
-            for (const value of Object.values(material)) {
-              if (value instanceof THREE.Texture) value.dispose()
-            }
-            material.dispose()
-          }
-        })
         state.renderer.dispose()
         sceneRef.current = null
       }
@@ -364,6 +559,13 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
     // The scene is created once per model; telemetry flows through liveRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model.id, model.modelUrl, model.realLengthM, model.noseAlongPositiveX])
+
+  // Quality changes are applied to the live scene: pixel ratio, model LOD and
+  // ground resolution change, but the camera stays exactly where the user left
+  // it (the scene, renderer and controls are not rebuilt).
+  useEffect(() => {
+    sceneRef.current?.applyQuality()
+  }, [performance])
 
   // Close with ESC. The handler is registered in the capture phase so the
   // topmost overlay wins the key before global shortcuts, and a stable ref
@@ -395,7 +597,11 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
       className="fixed inset-0 z-[60] overflow-hidden bg-[#0d1218]"
     >
       <div ref={containerRef} className="absolute inset-0">
-        <canvas ref={canvasRef} className="block h-full w-full" aria-label="Modelo 3D de la aeronave" />
+        <canvas
+          ref={canvasRef}
+          className="block h-full w-full"
+          aria-label="Modelo 3D de la aeronave"
+        />
       </div>
 
       {/* Header */}
@@ -407,7 +613,8 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
               Vista 3D · {model.label}
             </h2>
             <p className="tech mt-0.5 truncate text-[11px] text-white/60">
-              {aircraft.callsign} · {aircraft.type ?? model.representative} · modelo {model.representative} a escala 1:1
+              {aircraft.callsign} · {aircraft.type ?? model.representative} · modelo{' '}
+              {model.representative} a escala 1:1
             </p>
           </div>
         </div>
@@ -437,52 +644,113 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         </div>
       )}
 
-      {/* HUD */}
-      <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100vw-24px)] flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-white/[0.09] bg-black/55 px-3 py-2">
-        <HudStat label="Altitud real" value={`${altitudeM.toLocaleString('es-ES')} m`} />
-        <HudStat
-          label="Sobre el mapa"
-          value={aircraft.onGround ? 'En tierra' : `${aircraft.altitude.toLocaleString('es-ES')} ft`}
-        />
-        <HudStat label="Rumbo" value={formatHeading(aircraft.heading)} />
-        <HudStat label="Velocidad" value={formatSpeed(aircraft.groundSpeed)} />
-        <HudStat
-          label="Escala"
-          value={`1:1 · ${model.realLengthM.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m`}
-        />
-      </div>
+      {/* HUD: stats on one row, viewer controls above them. On phones the
+          column stacks so nothing overlaps the telemetry bar. */}
+      <div className="pointer-events-none absolute inset-x-3 bottom-3 flex flex-col-reverse items-stretch gap-1.5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex max-w-full flex-wrap items-center gap-x-4 gap-y-1 self-start rounded-lg border border-white/[0.09] bg-black/55 px-3 py-2">
+          <HudStat label="Altitud real" value={`${altitudeM.toLocaleString('es-ES')} m`} />
+          <HudStat
+            label="Sobre el mapa"
+            value={
+              aircraft.onGround ? 'En tierra' : `${aircraft.altitude.toLocaleString('es-ES')} ft`
+            }
+          />
+          <HudStat label="Rumbo" value={formatHeading(aircraft.heading)} />
+          <HudStat label="Velocidad" value={formatSpeed(aircraft.groundSpeed)} />
+          <HudStat
+            label="Escala"
+            value={`1:1 · ${model.realLengthM.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m`}
+          />
+        </div>
 
-      <div className="pointer-events-none absolute bottom-3 right-3 flex max-w-[46vw] flex-col items-end gap-1">
-        <div
-          className="tech pointer-events-auto flex items-center gap-1 rounded border border-white/[0.09] bg-black/55 px-2 py-1"
-          role="group"
-          aria-label="Distancia de renderizado"
-        >
-          <span className="text-[9px] uppercase tracking-wider text-white/45">Distancia de renderizado</span>
-          {VIEW_DISTANCES.map((value) => (
+        <div className="flex max-w-full flex-col items-end gap-1 self-end sm:max-w-[46vw]">
+          <div
+            className="tech pointer-events-auto flex items-center gap-1 rounded border border-white/[0.09] bg-black/55 px-2 py-1"
+            role="group"
+            aria-label="Distancia de renderizado"
+          >
+            <span className="text-[9px] uppercase tracking-wider text-white/45">
+              Distancia de renderizado
+            </span>
+            {VIEW_DISTANCES.map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setRange(value)}
+                aria-label={`Distancia de renderizado ×${value}`}
+                aria-pressed={range === value}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition ${
+                  range === value
+                    ? 'bg-accent text-[#111317]'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                ×{value}
+              </button>
+            ))}
+          </div>
+          <div className="relative pointer-events-auto" ref={qualityPanelRef}>
             <button
-              key={value}
               type="button"
-              onClick={() => setRange(value)}
-              aria-label={`Distancia de renderizado ×${value}`}
-              aria-pressed={range === value}
-              className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition ${
-                range === value
+              onClick={() => setQualityOpen((open) => !open)}
+              aria-expanded={qualityOpen}
+              aria-haspopup="true"
+              aria-label="Calidad del visor 3D"
+              className={`tech flex items-center gap-1 rounded border border-white/[0.09] px-2 py-1 text-[10px] transition ${
+                qualityOpen
                   ? 'bg-accent text-[#111317]'
-                  : 'text-white/70 hover:bg-white/10 hover:text-white'
+                  : 'bg-black/55 text-white/70 hover:bg-white/10'
               }`}
             >
-              ×{value}
+              <SlidersHorizontal className="h-3 w-3" />
+              Calidad
             </button>
-          ))}
+            {qualityOpen && (
+              <div
+                role="group"
+                aria-label="Ajustes de calidad del visor 3D"
+                className="absolute bottom-full right-0 mb-1.5 w-[256px] rounded-lg border border-white/[0.12] bg-[#0b0f14]/95 p-2.5 shadow-2xl backdrop-blur"
+              >
+                <QualitySelect
+                  id="viewer-mesh-quality"
+                  label="Malla"
+                  value={performance.mesh}
+                  options={QUALITY_TIERS}
+                  labels={QUALITY_LABELS}
+                  onChange={(value) => setPerformance({ ...performance, mesh: value })}
+                />
+                <QualitySelect
+                  id="viewer-texture-quality"
+                  label="Texturas"
+                  value={performance.textures}
+                  options={QUALITY_TIERS}
+                  labels={QUALITY_LABELS}
+                  onChange={(value) => setPerformance({ ...performance, textures: value })}
+                />
+                <QualitySelect
+                  id="viewer-resolution"
+                  label="Resolución"
+                  value={performance.resolution}
+                  options={RENDER_RESOLUTIONS}
+                  labels={RESOLUTION_LABELS}
+                  onChange={(value) => setPerformance({ ...performance, resolution: value })}
+                />
+                <p className="mt-2 border-t border-white/[0.08] pt-1.5 text-[9px] leading-snug text-white/40">
+                  {performance.resolution === 'auto'
+                    ? `Resolución automática · aplicando ×${autoScale.toLocaleString('es-ES')}`
+                    : 'Se aplica al instante; la cámara no se mueve.'}
+                </p>
+              </div>
+            )}
+          </div>
+          <span className="tech hidden rounded border border-white/[0.09] bg-black/55 px-2.5 py-1 text-[10px] text-white/60 sm:inline-flex">
+            Arrastra para orbitar · Rueda para acercar
+          </span>
+          <span className="tech text-right text-[9px] leading-tight text-white/45">
+            {attribution ? `${attribution} · ` : 'Cartografía procedural · '}
+            Modelos 3D del proyecto
+          </span>
         </div>
-        <span className="tech rounded border border-white/[0.09] bg-black/55 px-2.5 py-1 text-[10px] text-white/60">
-          Arrastra para orbitar · Rueda para acercar
-        </span>
-        <span className="tech text-right text-[9px] leading-tight text-white/45">
-          {attribution ? `${attribution} · ` : 'Cartografía procedural · '}
-          Modelos 3D del proyecto
-        </span>
       </div>
     </div>,
     portalHost,
@@ -496,6 +764,97 @@ function HudStat({ label, value }: { label: string; value: string }) {
       <span className="tech text-xs font-bold text-white/85">{value}</span>
     </div>
   )
+}
+
+interface QualitySelectProps<T extends string> {
+  id: string
+  label: string
+  value: T
+  options: readonly T[]
+  labels: Record<T, string>
+  onChange: (value: T) => void
+}
+
+function QualitySelect<T extends string>({
+  id,
+  label,
+  value,
+  options,
+  labels,
+  onChange,
+}: QualitySelectProps<T>) {
+  return (
+    <label htmlFor={id} className="mb-1.5 flex items-center justify-between gap-2 last:mb-0">
+      <span className="tech text-[10px] uppercase tracking-wider text-white/45">{label}</span>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+        className="tech h-6 max-w-[150px] rounded border border-white/[0.12] bg-[#12151a] px-1 text-[10px] text-white/80 outline-none focus:border-accent"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {labels[option]}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+/** Triangles drawn by an object tree (DEV diagnostics for the LOD ladder). */
+function countTriangles(root: THREE.Object3D): number {
+  let total = 0
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh
+    if (!mesh.isMesh || !mesh.geometry) return
+    const index = mesh.geometry.getIndex()
+    const count = index ? index.count : (mesh.geometry.getAttribute('position')?.count ?? 0)
+    total += Math.floor(count / 3)
+  })
+  return total
+}
+
+/** Longest texture edge of an object tree (DEV diagnostics for texture tiers). */
+function maxTextureSize(root: THREE.Object3D): number {
+  let longest = 0
+  const seen = new Set<THREE.Texture>()
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh
+    const materials = Array.isArray(mesh.material)
+      ? mesh.material
+      : mesh.material
+        ? [mesh.material]
+        : []
+    for (const material of materials) {
+      for (const value of Object.values(material)) {
+        if (!(value instanceof THREE.Texture) || seen.has(value)) continue
+        seen.add(value)
+        const image = value.image as { width?: number; height?: number } | null
+        longest = Math.max(longest, Number(image?.width) || 0, Number(image?.height) || 0)
+      }
+    }
+  })
+  return longest
+}
+
+/** Frees the geometries, materials and textures of a scene subtree. */
+function disposeObject3D(root: THREE.Object3D): void {
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh
+    if (mesh.geometry) mesh.geometry.dispose()
+    const materials = Array.isArray(mesh.material)
+      ? mesh.material
+      : mesh.material
+        ? [mesh.material]
+        : []
+    for (const material of materials) {
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) value.dispose()
+      }
+      material.dispose()
+    }
+  })
 }
 
 /** Equirectangular sky gradient: deep blue overhead, pale haze at the horizon. */
@@ -543,20 +902,25 @@ function requestGround(
   const drift = Math.hypot(driftEastM, driftNorthM)
   // Wide cruise windows tolerate more drift before paying for a re-fetch.
   const driftLimit = Math.max(REFRESH_DRIFT_M, (state.patchWindow?.sizeMeters ?? 0) * 0.08)
+  const mesh = state.quality.mesh
+  const textures = state.quality.textures
+  const qualityKey = `${MESH_SEGMENTS[mesh]}/${GROUND_TILE_PX[textures]}/${TERRAIN_STRIDE[mesh]}`
   const needs =
     !state.patchWindow ||
     state.patchWindow.z !== win.z ||
     state.patchWindow.n !== win.n ||
     state.range !== range ||
+    state.groundKey !== qualityKey ||
     drift > driftLimit
   if (!needs || state.fetching) return
   state.fetching = true
   state.range = range
+  state.groundKey = qualityKey
   if (!state.patchWindow) setGroundLoading(true)
   const token = ++state.fetchToken
   void Promise.all([
-    fetchGroundPatch(win, state.abort.signal),
-    fetchTerrainPatch(win, state.abort.signal),
+    fetchGroundPatch(win, state.abort.signal, GROUND_TILE_PX[textures]),
+    fetchTerrainPatch(win, state.abort.signal, TERRAIN_STRIDE[mesh]),
   ])
     .then(([patch, terrain]) => {
       if (state.disposed || token !== state.fetchToken) return
@@ -570,6 +934,8 @@ function requestGround(
     .catch(() => {
       if (state.disposed || token !== state.fetchToken) return
       state.fetching = false
+      // Retry on the next heartbeat (a quality change may be waiting).
+      state.groundKey = ''
       setGroundLoading(false)
     })
 }
@@ -587,7 +953,11 @@ function applyPatch(
     state.groundObject.traverse((node) => {
       const mesh = node as THREE.Mesh
       if (mesh.geometry) mesh.geometry.dispose()
-      const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
+      const materials = Array.isArray(mesh.material)
+        ? mesh.material
+        : mesh.material
+          ? [mesh.material]
+          : []
       for (const material of materials) {
         for (const value of Object.values(material)) {
           if (value instanceof THREE.Texture) value.dispose()
@@ -599,9 +969,9 @@ function applyPatch(
   }
 
   if (patch.canvas) {
-    const geometry = new THREE.PlaneGeometry(win.sizeMeters, win.sizeMeters, MESH_SEGMENTS, MESH_SEGMENTS)
+    const span = MESH_SEGMENTS[state.quality.mesh]
+    const geometry = new THREE.PlaneGeometry(win.sizeMeters, win.sizeMeters, span, span)
     const positions = geometry.attributes.position as THREE.BufferAttribute
-    const span = MESH_SEGMENTS
     for (let j = 0; j <= span; j++) {
       for (let i = 0; i <= span; i++) {
         const height = terrain ? sampleHeight(terrain, i / span, j / span) : 0
@@ -613,8 +983,16 @@ function applyPatch(
     geometry.rotateX(-Math.PI / 2)
     const texture = new THREE.CanvasTexture(patch.canvas)
     texture.colorSpace = THREE.SRGBColorSpace
-    texture.anisotropy = 8
-    const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95, metalness: 0 })
+    texture.anisotropy = Math.min(
+      TEXTURE_ANISOTROPY[state.quality.textures],
+      state.renderer.capabilities.getMaxAnisotropy(),
+    )
+    // Lambert is much cheaper per fragment on mobile GPUs and the terrain is
+    // a flat-lit satellite image anyway.
+    const material =
+      state.quality.textures === 'baja'
+        ? new THREE.MeshLambertMaterial({ map: texture })
+        : new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95, metalness: 0 })
     state.groundObject = new THREE.Mesh(geometry, material)
   } else {
     state.groundObject = new THREE.GridHelper(win.sizeMeters, 40, 0x2f3d4d, 0x1b232d)

@@ -110,6 +110,8 @@ export class DemoProvider implements AircraftProvider {
   private flights: SimFlight[] = []
   private rng: () => number
   private fleetSize: number
+  /** Elapsed time not yet applied to the fleet (see `advance`). */
+  private accumulatorMs = 0
 
   constructor(options: DemoProviderOptions = {}) {
     this.fleetSize = options.fleetSize ?? 600
@@ -282,7 +284,8 @@ export class DemoProvider implements AircraftProvider {
     const moved = distanceNm(prev, { lat: f.lat, lon: f.lon })
     if (!p.onGround && moved > 1e-5 && hours > 0) {
       const raw = bearingDeg(prev, { lat: f.lat, lon: f.lon })
-      f.heading = lerpAngle(f.heading, raw, 0.3)
+      // Frame-rate independent turn: 0.3 per 16 ms frame ≈ τ 60 ms.
+      f.heading = lerpAngle(f.heading, raw, 1 - Math.exp(-dtMs / 60))
     }
 
     const minutes = dtMs / 60_000
@@ -302,9 +305,16 @@ export class DemoProvider implements AircraftProvider {
   /** Advance the simulation clock (called by the engine every frame). */
   advance(deltaMs: number): void {
     if (deltaMs <= 0) return
+    // The model is parametric, so it does not need one step per animation
+    // frame: accumulating to 20 Hz cuts the trigonometry of the whole fleet
+    // by ~3× on every device (positions are only published on poll anyway).
+    this.accumulatorMs += deltaMs
+    if (this.accumulatorMs < 50) return
+    const elapsed = this.accumulatorMs
+    this.accumulatorMs = 0
     // Sub-step so long frames (background tabs, slow devices) stay stable.
-    const steps = clamp(Math.ceil(deltaMs / 2000), 1, 8)
-    const dt = deltaMs / steps
+    const steps = clamp(Math.ceil(elapsed / 2000), 1, 8)
+    const dt = elapsed / steps
     for (let s = 0; s < steps; s++) {
       for (const f of this.flights) this.applyProfile(f, dt)
     }

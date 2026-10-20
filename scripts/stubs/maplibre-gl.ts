@@ -31,6 +31,7 @@ export class Map {
   private pitch = 0
   private bearing = 0
   private maxPitch = 70
+  private pixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
   private canvasListeners = new globalThis.Map<string, Set<(event: never) => void>>()
   private canvas: FakeCanvas = {
     style: {},
@@ -169,6 +170,12 @@ export class Map {
   setFilter(): void {}
   setMaxPitch(maxPitch: number): void {
     this.maxPitch = maxPitch
+  }
+  getPixelRatio(): number {
+    return this.pixelRatio
+  }
+  setPixelRatio(pixelRatio: number): void {
+    this.pixelRatio = pixelRatio
   }
   setStyle(): void {}
   isStyleLoaded(): boolean {

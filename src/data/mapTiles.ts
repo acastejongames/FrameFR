@@ -27,6 +27,15 @@ export const TILE_PX = 256
 /** Satellite tiles per side of the base ground patch. Terrain uses ¼ as many at z−2. */
 export const GROUND_TILES = 8
 
+/** How long a single tile may take before the patch gives up on it. */
+export const TILE_TIMEOUT_MS = 8_000
+/**
+ * Decoded tiles kept between patches. Consecutive windows overlap heavily, so
+ * this avoids re-downloading most of the imagery every time the plane drifts
+ * far enough to re-centre.
+ */
+export const TILE_CACHE_LIMIT = 192
+
 /** Render-distance multipliers offered by the 3D viewer (1 = default, 5 = max). */
 export const VIEW_DISTANCES = [1, 2, 3, 4, 5] as const
 export type ViewDistance = (typeof VIEW_DISTANCES)[number]
@@ -63,7 +72,7 @@ export interface GroundPatch {
 /** Terrain heights (meters, row-major; row 0 is the north edge, like the raster). */
 export interface TerrainPatch {
   heights: Float32Array
-  /** Samples per side (`n*64`: one terrarium pixel per 4 sat px at z−2). */
+  /** Samples per side (`n*64/stride`, one terrarium pixel per 4 sat px at z−2). */
   samples: number
   window: GroundWindow
 }
@@ -148,7 +157,10 @@ export function viewWindow(latDeg: number, lonDeg: number, altitudeM: number, mu
  * the returned block plus the DEM-pixel offset of the window locates the
  * exact region inside it.
  */
-export function terrainTilesOf(win: GroundWindow): {
+export function terrainTilesOf(
+  win: GroundWindow,
+  stride = 1,
+): {
   z: number
   x0: number
   y0: number
@@ -156,21 +168,28 @@ export function terrainTilesOf(win: GroundWindow): {
   offsetY: number
   blockX: number
   blockY: number
+  /** Heightfield samples per side after applying `stride`. */
+  samples: number
+  /** DEM pixels skipped between samples (1 = full resolution). */
+  stride: number
 } {
+  const step = Math.max(1, Math.round(stride))
   const z = win.z - 2
   const x0 = Math.floor(win.x0 / 4)
   const y0 = Math.floor(win.y0 / 4)
   const offsetX = (win.x0 - x0 * 4) * 64
   const offsetY = (win.y0 - y0 * 4) * 64
-  const samples = win.n * (TILE_PX / 4)
+  const samples = (win.n * (TILE_PX / 4)) / step
   return {
     z,
     x0,
     y0,
     offsetX,
     offsetY,
-    blockX: Math.ceil((offsetX + samples) / TILE_PX),
-    blockY: Math.ceil((offsetY + samples) / TILE_PX),
+    blockX: Math.ceil((offsetX + samples * step) / TILE_PX),
+    blockY: Math.ceil((offsetY + samples * step) / TILE_PX),
+    samples,
+    stride: step,
   }
 }
 
@@ -184,7 +203,39 @@ export function tileUrl(template: string, z: number, x: number, y: number): stri
   return template.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y))
 }
 
+/* ------------------------------------------------------------ tile cache */
+/* Decoded <img> elements are cheap to keep and expensive to re-download; an
+   LRU keyed by URL lets the next ground window reuse the overlapping tiles
+   (a re-centre usually shares ~80% of them with the previous one). */
+
+const tileCache = new Map<string, HTMLImageElement>()
+
+function rememberTile(url: string, image: HTMLImageElement): void {
+  tileCache.delete(url)
+  tileCache.set(url, image)
+  while (tileCache.size > TILE_CACHE_LIMIT) {
+    const oldest = tileCache.keys().next().value
+    if (oldest === undefined) break
+    tileCache.delete(oldest)
+  }
+}
+
+/** Number of decoded tiles currently cached (tests/dev). */
+export function tileCacheSize(): number {
+  return tileCache.size
+}
+
+/** Drops every cached tile (tests/dev). */
+export function clearTileCache(): void {
+  tileCache.clear()
+}
+
 function loadTileImage(url: string, signal?: AbortSignal): Promise<HTMLImageElement | null> {
+  const cached = tileCache.get(url)
+  if (cached) {
+    rememberTile(url, cached)
+    return Promise.resolve(cached)
+  }
   return new Promise((resolve) => {
     if (signal?.aborted) {
       resolve(null)
@@ -192,17 +243,32 @@ function loadTileImage(url: string, signal?: AbortSignal): Promise<HTMLImageElem
     }
     const img = new Image()
     img.crossOrigin = 'anonymous'
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
     const settle = (value: HTMLImageElement | null): void => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
       img.onload = null
       img.onerror = null
+      if (value) rememberTile(url, value)
       resolve(value)
     }
     img.onload = () => settle(signal?.aborted ? null : img)
     img.onerror = () => settle(null)
-    signal?.addEventListener('abort', () => {
+    // A single stalled request must not hold the whole patch hostage.
+    timer = setTimeout(() => {
       img.src = ''
       settle(null)
-    })
+    }, TILE_TIMEOUT_MS)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        img.src = ''
+        settle(null)
+      },
+      { once: true },
+    )
     img.src = url
   })
 }
@@ -214,17 +280,21 @@ async function compositeTiles(
   y0: number,
   n: number,
   signal?: AbortSignal,
+  tilePx = TILE_PX,
 ): Promise<HTMLCanvasElement | null> {
   const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = n * TILE_PX
+  canvas.width = canvas.height = n * tilePx
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
+  // Smoother downscales on the low texture tiers.
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
   const jobs: Array<Promise<boolean>> = []
   for (let ty = 0; ty < n; ty++) {
     for (let tx = 0; tx < n; tx++) {
       jobs.push(
         loadTileImage(tileUrl(template, z, x0 + tx, y0 + ty), signal).then((img) => {
-          if (img) ctx.drawImage(img, tx * TILE_PX, ty * TILE_PX)
+          if (img) ctx.drawImage(img, tx * tilePx, ty * tilePx, tilePx, tilePx)
           return Boolean(img)
         }),
       )
@@ -263,8 +333,20 @@ function fadeGroundRim(canvas: HTMLCanvasElement): void {
  * Fetches the ground raster for a window: satellite imagery first, then an
  * OpenStreetMap map, then the procedural grid (`kind: 'grid'`, no canvas).
  */
-export async function fetchGroundPatch(win: GroundWindow, signal?: AbortSignal): Promise<GroundPatch> {
-  const satellite = await compositeTiles(SATELLITE_TEMPLATE, win.z, win.x0, win.y0, win.n, signal)
+export async function fetchGroundPatch(
+  win: GroundWindow,
+  signal?: AbortSignal,
+  tilePx = TILE_PX,
+): Promise<GroundPatch> {
+  const satellite = await compositeTiles(
+    SATELLITE_TEMPLATE,
+    win.z,
+    win.x0,
+    win.y0,
+    win.n,
+    signal,
+    tilePx,
+  )
   if (satellite) {
     fadeGroundRim(satellite)
     return {
@@ -274,7 +356,15 @@ export async function fetchGroundPatch(win: GroundWindow, signal?: AbortSignal):
       attribution: 'Imágenes satelitales: Esri, Maxar, Earthstar Geographics',
     }
   }
-  const map = await compositeTiles(MAP_FALLBACK_TEMPLATE, win.z, win.x0, win.y0, win.n, signal)
+  const map = await compositeTiles(
+    MAP_FALLBACK_TEMPLATE,
+    win.z,
+    win.x0,
+    win.y0,
+    win.n,
+    signal,
+    tilePx,
+  )
   if (map) {
     fadeGroundRim(map)
     return {
@@ -291,9 +381,13 @@ export async function fetchGroundPatch(win: GroundWindow, signal?: AbortSignal):
  * Fetches the terrain relief of the window as a heightfield in meters.
  * Returns null when the DEM cannot be loaded (the ground stays flat).
  */
-export async function fetchTerrainPatch(win: GroundWindow, signal?: AbortSignal): Promise<TerrainPatch | null> {
-  const { z, x0, y0, offsetX, offsetY, blockX, blockY } = terrainTilesOf(win)
-  const samples = win.n * (TILE_PX / 4)
+export async function fetchTerrainPatch(
+  win: GroundWindow,
+  signal?: AbortSignal,
+  stride = 1,
+): Promise<TerrainPatch | null> {
+  const { z, x0, y0, offsetX, offsetY, blockX, blockY, samples, stride: step } =
+    terrainTilesOf(win, stride)
   const heights = new Float32Array(samples * samples)
   const ctxOf = (img: HTMLImageElement): ImageData | null => {
     const canvas = document.createElement('canvas')
@@ -319,26 +413,28 @@ export async function fetchTerrainPatch(win: GroundWindow, signal?: AbortSignal)
   }
   const decoded = await Promise.all(tiles)
   // Tiles that do not touch the window may be missing; overlapping ones may not.
+  const span = samples * step
   const overlapsWindow = (index: number): boolean => {
     const sx = (index % blockX) * TILE_PX
     const sy = Math.floor(index / blockX) * TILE_PX
-    return sx < offsetX + samples && sx + TILE_PX > offsetX && sy < offsetY + samples && sy + TILE_PX > offsetY
+    return sx < offsetX + span && sx + TILE_PX > offsetX && sy < offsetY + span && sy + TILE_PX > offsetY
   }
   if (decoded.some((tile, index) => !tile && overlapsWindow(index))) return null
-  decoded.forEach((tile, index) => {
-    if (!tile) return
-    const tileX = index % blockX
-    const tileY = Math.floor(index / blockX)
-    const data = tile.data
-    for (let py = 0; py < TILE_PX; py++) {
-      for (let px = 0; px < TILE_PX; px++) {
-        const sx = tileX * TILE_PX + px
-        const sy = tileY * TILE_PX + py
-        if (sx < offsetX || sx >= offsetX + samples || sy < offsetY || sy >= offsetY + samples) continue
-        const i = (py * TILE_PX + px) * 4
-        heights[(sy - offsetY) * samples + (sx - offsetX)] = decodeTerrariumPixel(data[i], data[i + 1], data[i + 2])
-      }
+  // Walk the output grid directly: with `stride` 2 this decodes a quarter of
+  // the pixels instead of scanning every tile and discarding half of them.
+  for (let dy = 0; dy < samples; dy++) {
+    const sy = offsetY + dy * step
+    const tileY = Math.floor(sy / TILE_PX)
+    const py = sy - tileY * TILE_PX
+    for (let dx = 0; dx < samples; dx++) {
+      const sx = offsetX + dx * step
+      const tileX = Math.floor(sx / TILE_PX)
+      const tile = decoded[tileY * blockX + tileX]
+      if (!tile) continue
+      const px = sx - tileX * TILE_PX
+      const i = (py * TILE_PX + px) * 4
+      heights[dy * samples + dx] = decodeTerrariumPixel(tile.data[i], tile.data[i + 1], tile.data[i + 2])
     }
-  })
+  }
   return { heights, samples, window: win }
 }

@@ -1,4 +1,4 @@
-import { LayoutDashboard, Radar, Settings, SlidersHorizontal, X } from 'lucide-react'
+import { Gauge, LayoutDashboard, Radar, Settings, SlidersHorizontal, X } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
   DEFAULT_MAX_AIRCRAFT,
@@ -9,6 +9,16 @@ import {
   type InterfaceScale,
   type SortKey,
 } from '@/config'
+import {
+  MAP_QUALITIES,
+  MAP_QUALITY_LABELS,
+  PERFORMANCE_PROFILES,
+  QUALITY_LABELS,
+  QUALITY_TIERS,
+  RENDER_RESOLUTIONS,
+  RESOLUTION_LABELS,
+  type PerformanceSettings,
+} from '@/data/quality'
 import { PROVIDERS, type ProviderId } from '@/data/registry'
 import type { BasemapId } from '@/map/style'
 import { BASEMAPS } from '@/map/style'
@@ -34,14 +44,17 @@ interface SettingsModalProps {
   onShowLabelsChange: (value: boolean) => void
   sortBy: SortKey
   onSortChange: (sort: SortKey) => void
+  performance: PerformanceSettings
+  onPerformanceChange: (value: PerformanceSettings) => void
 }
 
-type SettingsTab = 'general' | 'interface' | 'telemetry'
+type SettingsTab = 'general' | 'interface' | 'telemetry' | 'performance'
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; Icon: typeof Settings }> = [
   { id: 'general', label: 'General', Icon: SlidersHorizontal },
   { id: 'interface', label: 'Interfaz', Icon: LayoutDashboard },
   { id: 'telemetry', label: 'Telemetría', Icon: Radar },
+  { id: 'performance', label: 'Rendimiento', Icon: Gauge },
 ]
 
 const GUI_TOGGLES: Array<{ key: keyof GuiVisibility; label: string }> = [
@@ -81,6 +94,8 @@ export function SettingsModal({
   onShowLabelsChange,
   sortBy,
   onSortChange,
+  performance,
+  onPerformanceChange,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
 
@@ -142,7 +157,7 @@ export function SettingsModal({
         </div>
 
         <div
-          className="grid grid-cols-3 gap-1.5 border-b border-white/[0.07] bg-[#10141a] p-2.5"
+          className="grid grid-cols-4 gap-1 border-b border-white/[0.07] bg-[#10141a] p-2"
           role="tablist"
           aria-label="Secciones de ajustes"
         >
@@ -159,14 +174,14 @@ export function SettingsModal({
                 tabIndex={selected ? 0 : -1}
                 onClick={() => setActiveTab(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, index)}
-                className={`flex min-h-9 items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-semibold transition ${
+                className={`flex min-h-9 min-w-0 items-center justify-center gap-1 rounded-md border px-1 text-[10px] font-semibold transition sm:px-2 sm:text-[11px] ${
                   selected
                     ? 'border-accent/40 bg-accent/10 text-accent'
                     : 'border-transparent text-white/55 hover:border-white/10 hover:bg-white/[0.04] hover:text-white/85'
                 }`}
               >
-                <tab.Icon className="h-3.5 w-3.5 shrink-0" />
-                {tab.label}
+                <tab.Icon className="hidden h-3.5 w-3.5 shrink-0 sm:block" />
+                <span className="truncate">{tab.label}</span>
               </button>
             )
           })}
@@ -360,6 +375,147 @@ export function SettingsModal({
                 Las posiciones se dibujan únicamente cuando las informa la fuente seleccionada. Si las
                 actualizaciones en segundo plano están activadas en General, se mantiene la misma
                 frecuencia mientras la pestaña abierta está oculta.
+              </p>
+            </div>
+          )}
+
+          {activeTab === 'performance' && (
+            <div className="space-y-4">
+              <section className="space-y-3">
+                <div className={SECTION_TITLE}>Visor 3D</div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className={FIELD_LABEL} htmlFor="mesh-quality">
+                      Calidad de la malla
+                    </label>
+                    <select
+                      id="mesh-quality"
+                      value={performance.mesh}
+                      onChange={(event) =>
+                        onPerformanceChange({
+                          ...performance,
+                          mesh: event.target.value as PerformanceSettings['mesh'],
+                        })
+                      }
+                      className={SELECT_CLASS}
+                    >
+                      {QUALITY_TIERS.map((tier) => (
+                        <option key={tier} value={tier}>
+                          {QUALITY_LABELS[tier]}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[10px] leading-snug text-white/30">
+                      Detalle del avión y del relieve del terreno.
+                    </p>
+                  </div>
+                  <div>
+                    <label className={FIELD_LABEL} htmlFor="texture-quality">
+                      Calidad de las texturas
+                    </label>
+                    <select
+                      id="texture-quality"
+                      value={performance.textures}
+                      onChange={(event) =>
+                        onPerformanceChange({
+                          ...performance,
+                          textures: event.target.value as PerformanceSettings['textures'],
+                        })
+                      }
+                      className={SELECT_CLASS}
+                    >
+                      {QUALITY_TIERS.map((tier) => (
+                        <option key={tier} value={tier}>
+                          {QUALITY_LABELS[tier]}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[10px] leading-snug text-white/30">
+                      Resolución de la librea del avión y de las imágenes del terreno.
+                    </p>
+                  </div>
+                  <div>
+                    <label className={FIELD_LABEL} htmlFor="render-resolution">
+                      Resolución de renderizado
+                    </label>
+                    <select
+                      id="render-resolution"
+                      value={performance.resolution}
+                      onChange={(event) =>
+                        onPerformanceChange({
+                          ...performance,
+                          resolution: event.target.value as PerformanceSettings['resolution'],
+                        })
+                      }
+                      className={SELECT_CLASS}
+                    >
+                      {RENDER_RESOLUTIONS.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {RESOLUTION_LABELS[mode]}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[10px] leading-snug text-white/30">
+                      Píxeles del visor. La automática baja sola si el equipo no mantiene 30 fps.
+                    </p>
+                  </div>
+                  <div>
+                    <label className={FIELD_LABEL} htmlFor="map-quality">
+                      Calidad del mapa
+                    </label>
+                    <select
+                      id="map-quality"
+                      value={performance.map}
+                      onChange={(event) =>
+                        onPerformanceChange({
+                          ...performance,
+                          map: event.target.value as PerformanceSettings['map'],
+                        })
+                      }
+                      className={SELECT_CLASS}
+                    >
+                      {MAP_QUALITIES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {MAP_QUALITY_LABELS[mode]}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[10px] leading-snug text-white/30">
+                      Nitidez con la que MapLibre dibuja el mapa 2D.
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="border-t border-white/[0.06] pt-3.5">
+                <div className={SECTION_TITLE}>Perfiles rápidos</div>
+                <p className="mt-1 text-[10px] leading-snug text-white/35">
+                  Configuran los cuatro ajustes de golpe. Después puedes afinar cada uno.
+                </p>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {PERFORMANCE_PROFILES.map((profile) => (
+                    <button
+                      key={profile.id}
+                      type="button"
+                      data-profile={profile.id}
+                      onClick={() => onPerformanceChange(profile.settings)}
+                      className="rounded border border-white/[0.08] bg-ink-700 p-2.5 text-left transition hover:border-accent/40 hover:bg-white/[0.04]"
+                    >
+                      <span className="block text-[11px] font-semibold text-white/85">
+                        {profile.label}
+                      </span>
+                      <span className="mt-0.5 block text-[10px] leading-snug text-white/40">
+                        {profile.description}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <p className="border-t border-white/[0.06] px-0.5 pt-3.5 leading-relaxed text-white/40">
+                Ningún ajuste desactiva funciones: solo cambian el detalle, los píxeles y la memoria
+                que usa cada vista. El visor 3D también permite cambiarlo al vuelo desde su botón
+                «Calidad».
               </p>
             </div>
           )}

@@ -46,6 +46,9 @@ globalAny.requestAnimationFrame = (cb: FrameRequestCallback): number =>
   window.setTimeout(() => cb(Date.now()), 16) as unknown as number
 globalAny.cancelAnimationFrame = (id: number): void => window.clearTimeout(id)
 globalAny.IS_REACT_ACT_ENVIRONMENT = false
+// Retina-class device: the map/3D quality settings must actually change the
+// drawing buffer, which is only observable when devicePixelRatio > 1.
+Object.defineProperty(window, 'devicePixelRatio', { value: 2, configurable: true })
 
 /* --------------------------------------------------------- canvas stub */
 /* jsdom has no 2D context; the silhouette renderer only needs the calls to
@@ -242,7 +245,7 @@ container.querySelector<HTMLButtonElement>('[aria-label="Ajustes"]')!.click()
 await flush()
 const settingsDialog = container.querySelector<HTMLElement>('[role="dialog"]')!
 const settingsTabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-expect(settingsTabs.map((tab) => tab.textContent?.trim()).join('|') === 'General|Interfaz|Telemetría', 'ajustes divididos en tres pestañas')
+expect(settingsTabs.map((tab) => tab.textContent?.trim()).join('|') === 'General|Interfaz|Telemetría|Rendimiento', 'ajustes divididos en cuatro pestañas')
 expect(settingsTabs[0].getAttribute('aria-selected') === 'true', 'General es la pestaña inicial')
 expect(!settingsDialog.textContent?.includes('Modo limpio'), 'Modo limpio no debe duplicarse en Ajustes')
 expect(!settingsDialog.textContent?.includes('Configurar aeropuertos y carpetas'), 'aeropuertos no debe duplicarse en Ajustes')
@@ -279,6 +282,49 @@ settingsTabs[2].click()
 await flush()
 expect(Boolean(container.querySelector('#telemetry-provider')), 'proveedor ADS-B en Telemetría')
 expect(Boolean(container.querySelector('#telemetry-poll-interval')), 'frecuencia en Telemetría')
+settingsTabs[3].click()
+await flush()
+expect(settingsTabs[3].getAttribute('aria-selected') === 'true', 'pestaña Rendimiento seleccionable')
+const meshQuality = container.querySelector<HTMLSelectElement>('#mesh-quality')!
+const textureQuality = container.querySelector<HTMLSelectElement>('#texture-quality')!
+const resolutionSelect = container.querySelector<HTMLSelectElement>('#render-resolution')!
+const mapQuality = container.querySelector<HTMLSelectElement>('#map-quality')!
+expect(Boolean(meshQuality) && meshQuality.options.length === 3, 'calidad de malla en Rendimiento')
+expect(Boolean(textureQuality) && textureQuality.options.length === 3, 'calidad de texturas en Rendimiento')
+expect(Boolean(resolutionSelect), 'resolución de renderizado en Rendimiento')
+expect(Boolean(mapQuality), 'calidad del mapa en Rendimiento')
+mapQuality.value = 'alta'
+mapQuality.dispatchEvent(new window.Event('change', { bubbles: true }))
+await flush()
+expect(stubMap.getPixelRatio() === 2, 'la calidad del mapa aplica la resolución nativa al instante')
+mapQuality.value = 'rendimiento'
+mapQuality.dispatchEvent(new window.Event('change', { bubbles: true }))
+await flush()
+expect(stubMap.getPixelRatio() === 1, 'la calidad de rendimiento baja el mapa a 1×')
+const performanceProfile = container.querySelector<HTMLButtonElement>('[data-profile="rendimiento"]')!
+expect(Boolean(performanceProfile), 'perfiles rápidos en Rendimiento')
+performanceProfile.click()
+await flush()
+expect(
+  meshQuality.value === 'baja' &&
+    textureQuality.value === 'baja' &&
+    resolutionSelect.value === '1' &&
+    mapQuality.value === 'rendimiento',
+  'el perfil de máximo rendimiento configura los cuatro ajustes',
+)
+const storedPerformance = JSON.parse(window.localStorage.getItem('aeroscope:performance') ?? '{}') as {
+  mesh?: string
+  textures?: string
+  resolution?: string
+  map?: string
+}
+expect(
+  storedPerformance.mesh === 'baja' &&
+    storedPerformance.textures === 'baja' &&
+    storedPerformance.resolution === '1' &&
+    storedPerformance.map === 'rendimiento',
+  'los ajustes de rendimiento se persisten',
+)
 container.querySelector<HTMLButtonElement>('[aria-label="Cerrar ajustes"]')!.click()
 await flush()
 const madButton = [...container.querySelectorAll<HTMLButtonElement>('header button')]

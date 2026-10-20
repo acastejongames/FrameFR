@@ -128,7 +128,9 @@ completa con:
   de suelo alcanza ~160 km de visión en crucero (menos según baja la altitud),
   ampliable hasta **×5 con la distancia de renderizado** del propio visor; su
   borde se funde con el cielo en el horizonte y se re-centra según el avión
-  avanza y su altitud.
+  avanza y su altitud. El botón **Calidad** del propio visor permite cambiar
+  al vuelo la malla, las texturas y la resolución de renderizado sin mover la
+  cámara.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
   altitud, velocidad o indicativo.
 - **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
@@ -136,10 +138,12 @@ completa con:
   restablece el norte al pulsarla sin cambiar centro, zoom ni inclinación.
 - **Navegación 3D manual:** mantén pulsado el botón central/rueda del ratón y
   mueve el puntero para girar e inclinar; el botón derecho ya no rota el mapa.
-- **Ajustes:** tres pestañas —**General** (actualizaciones en segundo plano,
+- **Ajustes:** cuatro pestañas —**General** (actualizaciones en segundo plano,
   límite de aeronaves y orden), **Interfaz** (tamaño ×0.9/×1/×1.25, elementos
-  visibles incluida la brújula, etiquetas y estilo) y **Telemetría**
-  (proveedor y frecuencia ADS-B).
+  visibles incluida la brújula, etiquetas y estilo), **Telemetría** (proveedor
+  y frecuencia ADS-B) y **Rendimiento** (calidad de malla y texturas del visor
+  3D, resolución de renderizado automática o fija, calidad del mapa 2D y
+  perfiles rápidos para equipos modestos).
 - **Atajos:** `/` busca · `U` modo limpio · `Esc` cierra.
 
 Todo se guarda en el navegador: al recargar recuperas el proveedor, la
@@ -251,6 +255,22 @@ interfaz necesitan cambios.
   a la longitud real de su variante: escala 1:1 garantizada aunque cada GLB
   venga en unidades distintas. La página de desarrollo `model-check.html`
   renderiza los cinco modelos con el registro real.
+- **Calidad gráfica seleccionable** (Ajustes › Rendimiento y botón *Calidad*
+  del visor). En el visor 3D la malla del terreno pasa de 256² a 144²/96²
+  vértices y el modelo se decima con meshoptimizer conservando UV y normales;
+  las texturas bajan de 1024² a 512²/256² y el terreno compone a 256/128/64 px
+  por tesela. La resolución de renderizado automática mide los FPS y ajusta el
+  búfer entre ×0,75 y el máximo del equipo, y la calidad del mapa usa
+  `setPixelRatio` de MapLibre (en *Rendimiento* dibuja 1 píxel por píxel CSS
+  en lugar de hasta 3× en móviles). Ningún ajuste desactiva funciones.
+- Las teselas del terreno se guardan en una **caché LRU de 192 imágenes**:
+  al re-centrar la ventana se reutiliza la mayoría y solo se descargan las
+  nuevas; una tesela que no responde en 8 s no bloquea el parche.
+- El relieve DEM se decodifica con muestreo reducido en las calidades media y
+  baja (4× menos píxeles) y el visor suspende render y descargas con la
+  pestaña oculta.
+- La flota simulada avanza a 20 Hz en lugar de una vez por fotograma, con
+  giro de rumbo independiente de los FPS: ~3× menos CPU en el modo demo.
 - Probado para una resolución de referencia de 2560 × 1440.
 
 ## Meteorología y alcance de la migración

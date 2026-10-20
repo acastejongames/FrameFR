@@ -19,6 +19,13 @@ import { ALL_CATEGORIES, type FleetFilters } from '@/engine/fleetController'
 import { useFleetSnapshot } from '@/hooks/useFleetSnapshot'
 import { useGlobalSearch } from '@/hooks/useGlobalSearch'
 import { usePersistentState } from '@/hooks/usePersistentState'
+import {
+  DEFAULT_PERFORMANCE,
+  isPerformanceSettings,
+  mapPixelRatio,
+  normalizePerformance,
+  type PerformanceSettings,
+} from '@/data/quality'
 import { DEFAULT_BASEMAP, DEFAULT_BASEMAP_LAYERS, type BasemapId, type BasemapLayerVisibility } from '@/map/style'
 import { AircraftDetail } from '@/components/AircraftDetail'
 import { AirportHubs } from '@/components/AirportHubs'
@@ -80,6 +87,13 @@ export default function App() {
     undefined,
     normalizeInterfaceScale,
   )
+  const [performance, setPerformance] = usePersistentState<PerformanceSettings>(
+    'performance',
+    DEFAULT_PERFORMANCE,
+    isPerformanceSettings,
+    normalizePerformance,
+  )
+  const mapRatio = useMemo(() => mapPixelRatio(performance.map), [performance.map])
 
   /* --------------------------------------------------------- local state */
   const [fleetSize] = useState(Number(import.meta.env.VITE_FLEET_SIZE ?? 600) || 600)
@@ -303,6 +317,7 @@ export default function App() {
         basemap={basemap}
         basemapLayers={mapLayers}
         is3D={is3D}
+        pixelRatio={mapRatio}
         onReady={setHandle}
         onSelect={handleSelect}
         onFollowChange={setFollow}
@@ -448,6 +463,8 @@ export default function App() {
         onShowLabelsChange={setShowLabels}
         sortBy={sortBy}
         onSortChange={setSortBy}
+        performance={performance}
+        onPerformanceChange={setPerformance}
       />
 
       {hubsManagerOpen && (

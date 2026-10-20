@@ -22,6 +22,21 @@ import {
 } from '../src/data/mapTiles'
 import { motionTarget, MotionSampler, shortestArcDeg } from '../src/engine/motionSampler'
 import { northResetDelta } from '../src/components/MapCompass'
+import { SphereGeometry } from 'three'
+import { simplifyGeometry, triangleCount } from '../src/data/aircraft3dModels'
+import {
+  GROUND_TILE_PX,
+  MESH_SEGMENTS,
+  MIN_AUTO_RATIO,
+  MODEL_MIN_TRIANGLES,
+  MODEL_SIMPLIFY,
+  MODEL_TEXTURE_MAX,
+  TERRAIN_STRIDE,
+  isPerformanceSettings,
+  mapPixelRatio,
+  normalizePerformance,
+  viewerPixelRatio,
+} from '../src/data/quality'
 /**
  * Headless sanity check for the data layer.
  *
@@ -561,6 +576,57 @@ console.log('· Teselas del terreno del visor 3D…')
     'teselas: el DEM de ×5 cubre su ventana',
   )
   check(viewWindow(40, -3.5, 11_000, 9).n === 10, 'teselas: la distancia se recorta en 5')
+  const demHalf = terrainTilesOf(win, 2)
+  check(
+    demHalf.samples === 256 && demHalf.stride === 2 && demHalf.blockX * 256 >= demHalf.offsetX + 512,
+    'teselas: el DEM a media resolución cubre la misma ventana con la mitad de muestras',
+  )
+}
+
+console.log('· Calidad gráfica y LOD del visor 3D…')
+{
+  check(
+    MESH_SEGMENTS.alta > MESH_SEGMENTS.media && MESH_SEGMENTS.media > MESH_SEGMENTS.baja,
+    'calidad: la malla baja reduce los vértices del terreno',
+  )
+  check(
+    GROUND_TILE_PX.alta === 256 && GROUND_TILE_PX.baja < GROUND_TILE_PX.media,
+    'calidad: las texturas del terreno bajan de resolución',
+  )
+  check(
+    MODEL_TEXTURE_MAX.alta === 0 && MODEL_TEXTURE_MAX.media === 512 && MODEL_TEXTURE_MAX.baja === 256,
+    'calidad: la textura del avión conserva el original o baja a 512/256',
+  )
+  check(
+    MODEL_SIMPLIFY.baja < MODEL_SIMPLIFY.media && MODEL_SIMPLIFY.media < 1,
+    'calidad: el LOD del avión reduce triángulos',
+  )
+  check(TERRAIN_STRIDE.alta === 1 && TERRAIN_STRIDE.baja === 2, 'calidad: el DEM se muestrea a la mitad en baja')
+  check(!isPerformanceSettings({ mesh: 'alta' }), 'calidad: un ajuste incompleto no es válido')
+  const normalized = normalizePerformance({ mesh: 'baja', textures: 'raro', resolution: 42 })
+  check(
+    normalized.mesh === 'baja' &&
+      normalized.textures === 'alta' &&
+      normalized.resolution === 'auto' &&
+      normalized.map === 'auto',
+    'calidad: los campos inválidos caen al valor por defecto',
+  )
+  check(
+    viewerPixelRatio('1') === 1 && viewerPixelRatio('0.75') === 0.75 && MIN_AUTO_RATIO === 0.75,
+    'calidad: resoluciones fijas del visor',
+  )
+  check(mapPixelRatio('rendimiento') === 1, 'calidad: el mapa en rendimiento dibuja un píxel por CSS px')
+
+  const geometry = new SphereGeometry(1, 32, 32)
+  const before = triangleCount(geometry)
+  const simplified = await simplifyGeometry(geometry, 0.5)
+  const after = triangleCount(simplified)
+  check(before >= 1500, 'calidad: la esfera de prueba tiene detalle suficiente')
+  check(
+    after < before * 0.8 && after >= MODEL_MIN_TRIANGLES * 0.6,
+    'calidad: la simplificación reduce triángulos sin destruir el modelo',
+  )
+  check(triangleCount(geometry) === before, 'calidad: la geometría original no se modifica')
 }
 
 console.log('· Interpolación de movimiento del visor 3D…')

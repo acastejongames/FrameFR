@@ -1,3 +1,33 @@
+## Calidad gráfica seleccionable y rendimiento en equipos modestos — 2026-10-20
+
+- Nueva pestaña **Ajustes › Rendimiento** y control **Calidad** dentro del
+  visor 3D (se aplica al instante, sin mover la cámara):
+  - **Calidad de la malla** (Alta/Media/Baja): relieve del terreno de 66.049 a
+    21.025 y 9.409 vértices, y modelo del avión decimado de forma segura
+    (A320 5.229→2.352 triángulos en baja) con las UV y normales preservadas.
+  - **Calidad de las texturas** (Alta/Media/Baja): librea de 1024² a 512² y
+    256², imágenes del terreno de 256 a 128 y 64 px por tesela y anisotropía
+    ajustada (Lambert en baja).
+  - **Resolución de renderizado** (Automática/Nativa/×1/×0,75): píxeles del
+    visor. La automática mide los FPS y baja el búfer hasta ×0,75 si el
+    equipo no mantiene ~30 fps, y lo recupera cuando hay margen.
+  - **Calidad del mapa** (Automática/Alta/Equilibrada/Rendimiento): usa
+    `setPixelRatio` de MapLibre; en rendimiento el mapa 2D dibuja un píxel
+    por píxel CSS en lugar de 3× en pantallas retina.
+- **Perfiles rápidos** (Máxima calidad, Equilibrado, Máximo rendimiento) que
+  configuran los cuatro ajustes de golpe; todo se recuerda entre sesiones.
+- Optimizaciones generales sin quitar funciones:
+  - caché LRU de **192 teselas decodificadas** con reutilización entre
+    ventanas (al re-centrar se comparten ~80%), tiempo máximo por tesela y
+    reutilización inmediata al cambiar de calidad;
+  - el DEM se decodifica con muestreo reducido en media/baja (4× menos
+    píxeles) manteniendo la misma ventana georreferenciada;
+  - el visor **no renderiza ni descarga** con la pestaña oculta;
+  - la flota simulada avanza a 20 Hz en vez de una vez por fotograma y el
+    giro de rumbo es independiente de los FPS (~3× menos CPU);
+  - los ajustes persistentes se sincronizan al instante entre el visor y
+    Ajustes (y entre pestañas del navegador).
+
 ## Cámara firme, movimiento interpolado y distancia de renderizado ×5 — 2026-10-20
 
 - La cámara del visor 3D **se queda donde la pones**: los refrescos de

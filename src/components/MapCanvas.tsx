@@ -33,6 +33,8 @@ interface MapCanvasProps {
   basemap: BasemapId
   basemapLayers: BasemapLayerVisibility
   is3D: boolean
+  /** Drawing-buffer scale of the map canvas (quality setting). */
+  pixelRatio: number
   onReady: (handle: MapCanvasHandle | null) => void
   onSelect: (id: string | null) => void
   onFollowChange: (follow: boolean) => void
@@ -64,6 +66,7 @@ export function MapCanvas({
   basemap,
   basemapLayers,
   is3D,
+  pixelRatio,
   onReady,
   onSelect,
   onFollowChange,
@@ -85,6 +88,7 @@ export function MapCanvas({
     basemap,
     basemapLayers,
     is3D,
+    pixelRatio,
     maxAircraft,
     pollIntervalMs,
     backgroundUpdates,
@@ -109,6 +113,7 @@ export function MapCanvas({
       maxAircraft,
       pollIntervalMs,
       backgroundUpdates,
+      pixelRatio,
       onReady,
       onSelect,
       onFollowChange,
@@ -140,6 +145,9 @@ export function MapCanvas({
       refreshExpiredTiles: false,
     })
     mapRef.current = map
+    // Quality setting: MapLibre defaults to devicePixelRatio, which is 3× on
+    // many phones. Rendering one pixel per CSS pixel is a big GPU saving.
+    map.setPixelRatio(latest.current.pixelRatio)
     let lastErrorAt = 0
 
     // Runs on the first style and again after every basemap change (setStyle
@@ -307,6 +315,10 @@ export function MapCanvas({
   }, [])
 
   /* ------------------------------------------------------- prop syncing */
+  useEffect(() => {
+    mapRef.current?.setPixelRatio(pixelRatio)
+  }, [pixelRatio, ready])
+
   useEffect(() => {
     controllerRef.current?.setSelected(selectedId)
   }, [selectedId, ready])
