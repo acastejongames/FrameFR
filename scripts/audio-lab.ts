@@ -93,7 +93,11 @@ function noiseOf(seed: number, level: number): Float32Array {
 }
 
 /** Bicuadrada de 2º orden, solo para medir bandas. */
-function biquadRun(data: Float32Array, frequency: number, type: 'lowpass' | 'highpass'): Float32Array {
+function biquadRun(
+  data: Float32Array,
+  frequency: number,
+  type: 'lowpass' | 'highpass',
+): Float32Array {
   const omega = (2 * Math.PI * frequency) / RATE
   const cos = Math.cos(omega)
   const alpha = Math.sin(omega) / 2
@@ -192,7 +196,7 @@ function run(level: CleanupLevel, noisy: Float32Array) {
   const delay = measureLatency(level)
   const aligned = new Float32Array(N)
   for (let i = 0; i + delay < N; i += 1) aligned[i] = out[i + delay]
-  return { cleaner, out, aligned }
+  return { out, aligned }
 }
 
 const material = synthSpeech(7)
@@ -214,10 +218,7 @@ const tailTo = Math.round(1.55 * RATE)
 const guard = Math.round(0.03 * RATE)
 for (let i = 2 * guard; i < N - 2 * guard; i += 1) {
   if (active[i]) continue
-  if (
-    (i > guard && active[i - guard]) ||
-    (i < N - guard && active[i + guard])
-  ) {
+  if ((i > guard && active[i - guard]) || (i < N - guard && active[i + guard])) {
     continue
   }
   if (i % CYCLE >= tailFrom && i % CYCLE <= tailTo) gapMask[i] = 1
@@ -236,11 +237,9 @@ const referenceFiltered = biquadRun(biquadRun(speech, 4800, 'lowpass'), 100, 'hi
 const referenceBands = bandEnergies(referenceFiltered, loud)
 const referenceEnvelope = envelope(referenceFiltered, loud)
 
-console.log(
-  '\nnivel      huecos      voz   timbre   bombeo   ataques  recorte  latencia  longitud',
-)
+console.log('\nnivel      huecos      voz   timbre   bombeo   ataques  recorte  latencia  longitud')
 for (const { value } of CLEANUP_LEVELS) {
-  const { cleaner, out, aligned } = run(value, noisy)
+  const { out, aligned } = run(value, noisy)
 
   let gapBefore = 0
   let gapAfter = 0
@@ -251,7 +250,8 @@ for (const { value } of CLEANUP_LEVELS) {
     gapAfter += aligned[i] * aligned[i]
     gapCount += 1
   }
-  const gapDb = gapCount > 0 ? db(Math.sqrt(gapAfter / gapCount) / Math.sqrt(gapBefore / gapCount)) : 0
+  const gapDb =
+    gapCount > 0 ? db(Math.sqrt(gapAfter / gapCount) / Math.sqrt(gapBefore / gapCount)) : 0
 
   let voiceRef = 0
   let voiceOut = 0
@@ -300,7 +300,6 @@ for (const { value } of CLEANUP_LEVELS) {
       (out.length === N ? 'ok' : 'MAL').padStart(9),
     ].join('  '),
   )
-  void cleaner
 }
 
 // Arranque en mitad de una transmisión: el primer cuarto de segundo no debe
@@ -310,7 +309,9 @@ for (const { value } of CLEANUP_LEVELS) {
   const from = 0
   const to = Math.round(0.3 * RATE)
   const reference = Math.max(rms(speech, from, to), 1e-9)
-  console.log(`\narranque en voz (0–300 ms): ${db(rms(aligned, from, to) / reference).toFixed(2)} dB`)
+  console.log(
+    `\narranque en voz (0–300 ms): ${db(rms(aligned, from, to) / reference).toFixed(2)} dB`,
+  )
 }
 
 // El bypass tiene que ser bit a bit.
@@ -333,7 +334,11 @@ for (const { value } of CLEANUP_LEVELS) {
   cleaner.process(buffer)
   let peaks = 0
   for (let i = 1; i < buffer.length - 1; i += 1) {
-    if (Math.abs(buffer[i]) > 0.05 && Math.abs(buffer[i]) >= Math.abs(buffer[i - 1]) && Math.abs(buffer[i]) > Math.abs(buffer[i + 1])) {
+    if (
+      Math.abs(buffer[i]) > 0.05 &&
+      Math.abs(buffer[i]) >= Math.abs(buffer[i - 1]) &&
+      Math.abs(buffer[i]) > Math.abs(buffer[i + 1])
+    ) {
       peaks += 1
     }
   }

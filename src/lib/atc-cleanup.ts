@@ -62,15 +62,6 @@ export function saveCleanupLevel(level: CleanupLevel): void {
   }
 }
 
-export interface CleanupStats {
-  /** Ruido eliminado en el último instante, en dB (0 cuando está desactivado). */
-  reductionDb: number
-  /** 0..1 probabilidad de voz de los últimos análisis. */
-  speech: number
-  /** True cuando el limitador ha tenido que recortar un pico. */
-  limited: boolean
-}
-
 interface CleanupProfile {
   /** Atenuación máxima que puede aplicar el reductor (dB). */
   floorDb: number
@@ -274,11 +265,6 @@ export class AtcCleanup {
   private subCount = 0
   private primed = false
 
-  // Medidas para la interfaz.
-  private speech = 0
-  private reduction = 0
-  private limited = false
-
   constructor(sampleRate: number, level: CleanupLevel = 'off') {
     this.sampleRate = Math.max(8000, Math.min(96000, sampleRate))
     // La ventana se elige por duración (~10,7 ms), no por número de muestras.
@@ -312,7 +298,10 @@ export class AtcCleanup {
     this.minimumRing = Array.from({ length: SUB_WINDOWS }, () =>
       new Float32Array(this.bins).fill(Number.POSITIVE_INFINITY),
     )
-    this.subWindowFrames = Math.max(6, Math.round((SUB_WINDOW_MS / 1000) * this.sampleRate / this.hop))
+    this.subWindowFrames = Math.max(
+      6,
+      Math.round(((SUB_WINDOW_MS / 1000) * this.sampleRate) / this.hop),
+    )
 
     this.highpass.highpass(this.sampleRate, 100)
     this.setLevel(level)
@@ -332,11 +321,6 @@ export class AtcCleanup {
 
   get currentLevel(): CleanupLevel {
     return this.level
-  }
-
-  /** Últimas medidas, para el indicador de la interfaz. */
-  stats(): CleanupStats {
-    return { reductionDb: this.reduction, speech: this.speech, limited: this.limited }
   }
 
   reset(): void {
@@ -359,9 +343,6 @@ export class AtcCleanup {
     this.minimumIndex = 0
     this.subCount = 0
     this.primed = false
-    this.speech = 0
-    this.reduction = 0
-    this.limited = false
     this.highpass.reset()
     this.lowpass.reset()
   }
@@ -411,15 +392,8 @@ export class AtcCleanup {
     this.floorGain +=
       (this.floorTarget - this.floorGain) * (1 - Math.exp(-this.hop / (0.05 * this.sampleRate)))
 
-    const bandLow = Math.max(1, Math.floor((250 * fftSize) / this.sampleRate))
-    const bandHigh = Math.min(bins - 1, Math.ceil((3400 * fftSize) / this.sampleRate))
     const floor = this.floorGain
     const subtract = this.profile.overSubtraction
-
-    let voiceBins = 0
-    let bandBins = 0
-    let removed = 0
-    let total = 0
 
     for (let k = 0; k < bins; k += 1) {
       const noisePower = Math.max(this.noise[k] * this.profile.noiseBias * subtract, 1e-12)
@@ -427,7 +401,8 @@ export class AtcCleanup {
       // A priori SNR con decisión dirigida (Ephraim–Malah): usa la ganancia del
       // marco anterior, así que la ganancia no baila de un marco a otro.
       const prior =
-        0.94 * this.prevGain[k] * this.prevGain[k] * this.prevGamma[k] + 0.06 * Math.max(gamma - 1, 0)
+        0.94 * this.prevGain[k] * this.prevGain[k] * this.prevGamma[k] +
+        0.06 * Math.max(gamma - 1, 0)
       let gain = prior / (1 + prior)
       if (!Number.isFinite(gain) || gain < floor) gain = floor
       else if (gain > 1) gain = 1
@@ -436,17 +411,6 @@ export class AtcCleanup {
       this.prevGamma[k] = Math.min(Math.max(gamma - 1, 0), 1e3)
       this.prevGain[k] = gain
       this.gains[k] = gain
-
-      if (this.primed) {
-        if (k >= bandLow && k <= bandHigh) {
-          bandBins += 1
-          const clean = gamma > 6
-          if (clean) voiceBins += 1
-          const weight = this.power[k]
-          removed += weight * (1 - gain * gain)
-          total += weight
-        }
-      }
     }
 
     // Suavizado en frecuencia: un bin aislado no puede tintinear, y eso es
@@ -466,14 +430,6 @@ export class AtcCleanup {
       const target = this.gains[k]
       const smoothing = target > this.smoothGain[k] ? rise : fall
       this.smoothGain[k] += (target - this.smoothGain[k]) * smoothing
-    }
-
-    if (this.primed && bandBins > 0) {
-      const fraction = voiceBins / bandBins
-      const probability = Math.max(0, Math.min(1, (fraction - 0.02) / 0.18))
-      this.speech = this.speech * 0.7 + probability * 0.3
-      const removedFraction = total > 0 ? Math.min(0.999, removed / total) : 0
-      this.reduction = this.reduction * 0.9 + -10 * Math.log10(1 - removedFraction) * 0.1
     }
   }
 
@@ -532,17 +488,12 @@ export class AtcCleanup {
     overlap.copyWithin(0, hop, fftSize)
     overlap.fill(0, fftSize - hop)
 
-    this.limited = false
     for (let i = 0; i < hop; i += 1) {
+      // Techo de seguridad: solo actúa si algo llega al fondo de escala (el
+      // limitador de la cadena nunca amplifica, así que casi nunca entra).
       let sample = hopOut[i]
-      // Limitador suave: solo actúa si algo llega al techo, nunca cambia el nivel normal.
-      if (sample > 0.985) {
-        sample = 0.985
-        this.limited = true
-      } else if (sample < -0.985) {
-        sample = -0.985
-        this.limited = true
-      }
+      if (sample > 0.999) sample = 0.999
+      else if (sample < -0.999) sample = -0.999
       this.writeFifo(sample)
     }
   }
