@@ -1,26 +1,12 @@
-## Fotogrametría 3D opcional (Google Photorealistic 3D Tiles) — 2026-10-20
+## Sin fotogrametría de pago — 2026-10-20
 
-- El visor 3D puede mostrar **terreno y edificios reales en 3D**, como Google
-  Earth, mediante una capa opcional de Google Photorealistic 3D Tiles. Se
-  activa en **Ajustes › Rendimiento › Fotogrametría 3D** o en el botón
-  **Calidad** del propio visor.
-- Es **opcional de verdad**: apagada por defecto y, sin clave de Google Maps
-  Platform (API *Map Tiles* + cuenta de facturación) o si Google la rechaza,
-  se mantiene el suelo satelital + relieve y el propio control explica qué
-  falta. Ningún fallo de red puede dejar el visor en negro ni en «cargando».
-- La clave se guarda **solo en este navegador** (`localStorage`), enmascarada
-  en los ajustes; también puede fijarse en el build con
-  `VITE_GOOGLE_3D_TILES_KEY`. Google factura por tileset raíz (1.000 gratis
-  al mes; 6 USD por cada 1.000 adicionales) y las teselas hijas no consumen
-  cuota: la capa solo pide la raíz al abrir y al re-anclar cada 40 km.
-- El renderizador de teselas (`3d-tiles-renderer`) se carga en un **chunk
-  perezoso** de 1,4 kB + sus dependencias solo al activar la capa: el arranque
-  de la aplicación no paga su coste.
-- La capa se **re-ancla** cuando el avión se aleja 40 km y ajusta su densidad
-  (error objetivo 6/12/24 y profundidad máxima 26/20/16) según la calidad de
-  malla, para no cargar de más en equipos modestos. Mientras hay fotogrametría
-  viva se desactiva la niebla y se oculta el suelo plano en cuanto llega la
-  primera tesela, sin costuras.
+- Se descarta la capa de **Google Photorealistic 3D Tiles**: Google obliga a
+  activar facturación y a un **prepago de 30 €**, fuera del alcance de este
+  proyecto. El visor 3D se queda con el suelo satelital de Esri + relieve
+  REAL (Terrarium), que es gratuito y no requiere clave de ningún tipo.
+- Se elimina la dependencia `3d-tiles-renderer`, el campo de clave de Google
+  en Ajustes y todo el estado asociado: menos código y un `package.json` más
+  ligero. No queda ninguna llamada a servicios de pago.
 
 ## Suelo continuo hasta el horizonte y parche de detalle — 2026-10-20
 

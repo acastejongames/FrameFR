@@ -40,12 +40,6 @@ import {
   type GroundWindow,
   type TerrainPatch,
 } from '@/data/mapTiles'
-import {
-  googleTilesKey,
-  REANCHOR_DRIFT_M,
-  type PhotogrammetryState,
-} from '@/data/photogrammetrySettings'
-import type { PhotogrammetryHandle } from '@/data/photogrammetry'
 import { MotionSampler, EARTH_M_PER_DEG, type MotionSample } from '@/engine/motionSampler'
 import type { RenderAircraft } from '@/engine/fleetController'
 import { formatHeading, formatSpeed } from '@/lib/format'
@@ -80,15 +74,6 @@ interface SceneState {
   detailObject: THREE.Object3D | null
   detailWindow: GroundWindow | null
   detailToken: number
-  /** Optional Google photorealistic tiles (null when off or unavailable). */
-  photogrammetry: PhotogrammetryHandle | null
-  photoAnchor: { lat: number; lon: number } | null
-  /** Key tail + mesh tier the live tiles were built with. */
-  photoSignature: string
-  /** Guards against a late tiles module landing after a toggle. */
-  photoToken: number
-  /** Sharp/satellite ground is hidden while the photogrammetry covers it. */
-  flatHidden: boolean
   /** Low zoom backdrop that reaches the horizon. */
   farObject: THREE.Object3D | null
   farWindow: GroundWindow | null
@@ -168,18 +153,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
   )
   const performanceRef = useRef(performance)
   performanceRef.current = performance
-  // Photogrammetry is opt-in: it needs a Google Maps Platform key with
-  // billing. Without it the viewer keeps the satellite + relief ground.
-  const [photogrammetryOn, setPhotogrammetryOn] = usePersistentState<boolean>(
-    'photogrammetry',
-    false,
-    (value): value is boolean => typeof value === 'boolean',
-  )
-  const photogrammetryRef = useRef(photogrammetryOn)
-  photogrammetryRef.current = photogrammetryOn
-  const [photoState, setPhotoState] = useState<PhotogrammetryState>('off')
-  const photoStateRef = useRef<PhotogrammetryState>('off')
-  photoStateRef.current = photoState
   const [autoScale, setAutoScale] = useState(() => viewerPixelRatio(performance.resolution))
   const [qualityOpen, setQualityOpen] = useState(false)
   const qualityPanelRef = useRef<HTMLDivElement>(null)
@@ -194,75 +167,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [qualityOpen])
-
-  /** Mirror of the photogrammetry preference for the frame loop. */
-  const photoRefs = useRef({ on: photogrammetryOn, key: googleTilesKey() })
-  photoRefs.current = { on: photogrammetryOn, key: photogrammetryOn ? googleTilesKey() : '' }
-
-  /**
-   * Creates, keeps or tears down the Google 3D tiles layer.
-   *
-   * Called on mount and whenever the setting changes. It never blocks: if the
-   * key is missing or Google rejects it, the satellite ground stays as is.
-   */
-  const syncPhotogrammetry = (state: SceneState): void => {
-    const { on, key } = photoRefs.current
-    if (!on || !key) {
-      teardownPhotogrammetry(state)
-      // Two different situations for the hint: the layer is simply off, or it
-      // is on but this browser has no Google key yet.
-      setPhotoState(on ? 'nokey' : 'off')
-      return
-    }
-    const signature = `${key.slice(-6)}/${state.quality.mesh}`
-    if (state.photogrammetry && state.photoSignature === signature) {
-      const drift = driftFromAnchor(state.photoAnchor, liveRef.current.aircraft)
-      if (drift < REANCHOR_DRIFT_M) return
-    }
-    // New anchor, new key or new mesh tier: rebuild from scratch.
-    teardownPhotogrammetry(state)
-    const aircraft = liveRef.current.aircraft
-    const mesh = state.quality.mesh
-    const token = ++state.photoToken
-    state.photoAnchor = { lat: aircraft.lat, lon: aircraft.lon }
-    state.photoSignature = signature
-    setPhotoState('loading')
-    // The tiles renderer is a heavy module: it only loads when the feature is
-    // actually requested.
-    void import('@/data/photogrammetry')
-      .then(({ loadPhotogrammetry }) =>
-        loadPhotogrammetry({
-          key,
-          lat: aircraft.lat,
-          lon: aircraft.lon,
-          quality: mesh,
-          onState: (next) => {
-            if (!state || state.disposed || token !== state.photoToken) return
-            setPhotoState(next)
-            if (next === 'error') {
-              // Keep the satellite ground; the user can check the key in Settings.
-              teardownPhotogrammetry(state)
-            }
-          },
-        }),
-      )
-      .then((handle) => {
-        if (!state || state.disposed || token !== state.photoToken) {
-          handle.dispose()
-          return
-        }
-        state.photogrammetry = handle
-        state.scene.add(handle.group)
-        state.scene.fog = null
-        state.camera.far = Math.max(1_500_000, state.camera.far)
-        state.camera.updateProjectionMatrix()
-      })
-      .catch(() => {
-        if (!state || state.disposed || token !== state.photoToken) return
-        teardownPhotogrammetry(state)
-        setPhotoState('error')
-      })
-  }
 
   useEffect(() => {
     const container = containerRef.current
@@ -342,11 +246,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         detailObject: null,
         detailWindow: null,
         detailToken: 0,
-        photogrammetry: null,
-        photoAnchor: null,
-        photoSignature: '',
-        photoToken: 0,
-        flatHidden: false,
         farObject: null,
         farWindow: null,
         farToken: 0,
@@ -406,8 +305,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
               (state?.detailObject as THREE.Mesh | null)?.geometry?.getAttribute('position')
                 ?.count ?? 0,
             far: Boolean(state?.farObject),
-            photogrammetry: state?.photogrammetry ? state.photoSignature : null,
-            photoState: photoStateRef.current,
             farWindow: state?.farWindow
               ? { z: state.farWindow.z, size: Math.round(state.farWindow.sizeMeters) }
               : null,
@@ -587,21 +484,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
           }
         }
 
-        if (state.photogrammetry) {
-          const photo = state.photogrammetry
-          offsetPhotogrammetry(state, motion ?? live)
-          photo.update(state.camera, state.renderer)
-          if (!state.flatHidden && photo.loaded()) {
-            // The tiles now cover the terrain: retire the flat satellite ground
-            // (it would otherwise z-fight with the real geometry).
-            state.groundGroup.visible = false
-            state.flatHidden = true
-          }
-        } else if (state.flatHidden) {
-          state.groundGroup.visible = true
-          state.flatHidden = false
-        }
-
         if (now >= state.nextGroundCheckAt) {
           state.nextGroundCheckAt = now + 500
           requestGround(state, motion, live, setGroundLoading, setAttribution, rangeRef.current)
@@ -655,7 +537,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         }
       }
       frame(0)
-      syncPhotogrammetry(state)
 
       const handleResize = (): void => {
         if (!state || state.disposed) return
@@ -686,7 +567,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         state.modelDispose?.()
         state.modelObject = null
         state.modelDispose = null
-        teardownPhotogrammetry(state)
         dropDetail(state)
         if (state.farObject) disposeObject3D(state.farObject)
         if (state.groundObject) disposeObject3D(state.groundObject)
@@ -718,13 +598,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
   useEffect(() => {
     sceneRef.current?.applyQuality()
   }, [performance])
-
-  // Photogrammetry is toggled from Settings: apply it to the live scene.
-  useEffect(() => {
-    const state = sceneRef.current
-    if (state) syncPhotogrammetry(state)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photogrammetryOn])
 
   // Close with ESC. The handler is registered in the capture phase so the
   // topmost overlay wins the key before global shortcuts, and a stable ref
@@ -894,32 +767,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
                   labels={RESOLUTION_LABELS}
                   onChange={(value) => setPerformance({ ...performance, resolution: value })}
                 />
-                <label
-                  htmlFor="viewer-photogrammetry"
-                  className="mt-2 flex items-center justify-between gap-2 border-t border-white/[0.08] pt-1.5"
-                >
-                  <span className="tech text-[10px] uppercase tracking-wider text-white/45">
-                    Fotogrametría 3D
-                  </span>
-                  <input
-                    id="viewer-photogrammetry"
-                    type="checkbox"
-                    checked={photogrammetryOn}
-                    onChange={(event) => setPhotogrammetryOn(event.target.checked)}
-                    className="h-3.5 w-3.5 cursor-pointer accent-[#ffbe00]"
-                  />
-                </label>
-                <p className="mt-1 text-[9px] leading-snug text-white/40">
-                  {photogrammetryOn
-                    ? photoState === 'ready'
-                      ? 'Google Photorealistic 3D Tiles · terreno y edificios reales.'
-                      : photoState === 'error'
-                        ? 'Google rechazó la clave: se mantiene el satélite + relieve.'
-                        : photoState === 'nokey'
-                          ? 'Añade una clave de Google Maps Platform en Ajustes › Fotogrametría 3D.'
-                          : 'Cargando fotogrametría de Google…'
-                    : 'Google Earth 3D. Necesita una clave de Google Maps Platform en Ajustes.'}
-                </p>
                 <p className="mt-2 border-t border-white/[0.08] pt-1.5 text-[9px] leading-snug text-white/40">
                   {performance.resolution === 'auto'
                     ? `Resolución automática · aplicando ×${autoScale.toLocaleString('es-ES')}`
@@ -1062,60 +909,6 @@ function skyTexture(): THREE.CanvasTexture {
   texture.mapping = THREE.EquirectangularReflectionMapping
   texture.colorSpace = THREE.SRGBColorSpace
   return texture
-}
-
-/** Metres between the tiles anchor and the aircraft's live position. */
-function driftFromAnchor(
-  anchor: { lat: number; lon: number } | null,
-  position: { lat: number; lon: number },
-): number {
-  if (!anchor) return Number.POSITIVE_INFINITY
-  const north = (position.lat - anchor.lat) * EARTH_M_PER_DEG
-  const east =
-    (position.lon - anchor.lon) *
-    EARTH_M_PER_DEG *
-    Math.cos((anchor.lat * Math.PI) / 180)
-  return Math.hypot(east, north)
-}
-
-/**
- * Slides the tiles under the aircraft, exactly like the flat ground, so the
- * plane stays at the origin of the scene while the world streams past it.
- */
-function offsetPhotogrammetry(
-  state: SceneState,
-  position: { lat: number; lon: number },
-): void {
-  if (!state.photogrammetry || !state.photoAnchor) return
-  const north = (position.lat - state.photoAnchor.lat) * EARTH_M_PER_DEG
-  const east =
-    (position.lon - state.photoAnchor.lon) *
-    EARTH_M_PER_DEG *
-    Math.cos((state.photoAnchor.lat * Math.PI) / 180)
-  state.photogrammetry.group.position.set(-east, 0, north)
-}
-
-/** Drops the tiles and restores the satellite ground + atmospheric haze. */
-function teardownPhotogrammetry(state: SceneState): void {
-  state.photoToken += 1
-  if (state.photogrammetry) {
-    state.photogrammetry.dispose()
-    state.photogrammetry = null
-  }
-  state.photoAnchor = null
-  state.photoSignature = ''
-  if (state.flatHidden) {
-    state.groundGroup.visible = true
-    state.flatHidden = false
-  }
-  // The flat ground relies on the fog for its horizon.
-  if (state.patchWindow && (!state.scene.fog || !(state.scene.fog instanceof THREE.Fog))) {
-    state.scene.fog = new THREE.Fog(
-      new THREE.Color(SKY_HORIZON),
-      state.patchWindow.sizeMeters * 0.5,
-      state.patchWindow.sizeMeters * 0.75,
-    )
-  }
 }
 
 /** Loads (or re-loads) the ground patch under the aircraft. */

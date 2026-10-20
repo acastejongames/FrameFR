@@ -69,7 +69,6 @@ Copia `.env.example` como `.env`. Todas son opcionales:
 | `VITE_FLEET_SIZE`    | `600`                     | Tamaño de la flota simulada (sólo `demo`)                |
 | `VITE_GLYPHS_URL`    | glifos de OpenFreeMap     | Tipografía de las etiquetas del mapa                     |
 | `VITE_BASE_PATH`     | `/<repo>/` en producción  | Ruta base del build                                      |
-| `VITE_GOOGLE_3D_TILES_KEY` | vacío              | Clave de Google para la fotogrametría 3D (opcional)      |
 
 ## 📡 Fuentes de datos
 
@@ -136,22 +135,6 @@ completa con:
   limite peticiones. El botón **Calidad** del propio visor permite cambiar
   al vuelo la malla, las texturas y la resolución de renderizado sin mover la
   cámara.
-- **Fotogrametría 3D opcional (Google Photorealistic 3D Tiles):** en
-  *Calidad* del visor o en **Ajustes › Rendimiento** se puede activar una capa
-  con el terreno y los edificios reales en 3D, como en Google Earth. Requiere
-  una **clave de Google Maps Platform** con la API *Map Tiles* habilitada y
-  una cuenta de facturación de Google; la clave se pega en
-  **Ajustes › Rendimiento › Fotogrametría 3D** (o se define en el build con
-  `VITE_GOOGLE_3D_TILES_KEY`) y **solo se guarda en este navegador**. Sin
-  clave, o si Google la rechaza, el visor mantiene el satélite + relieve y lo
-  explica en el propio control: la capa es siempre opcional y nunca rompe la
-  vista. Google factura por **consulta del tileset raíz** (1.000 gratis al mes
-  y 6 USD por cada 1.000 extra); las peticiones de teselas que hace el
-  renderizador no consumen esa cuota, y este proyecto solo pide la raíz al
-  abrir el visor y al re-anclar cada 40 km. El renderizador de teselas se carga en un chunk aparte al activarla,
-  las teselas se re-anclan cuando el avión se aleja 40 km y su densidad
-  (error objetivo y profundidad máxima) acompaña a la calidad de malla
-  elegida para no cargar de más los equipos modestos.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
   altitud, velocidad o indicativo.
 - **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
@@ -163,8 +146,8 @@ completa con:
   límite de aeronaves y orden), **Interfaz** (tamaño ×0.9/×1/×1.25, elementos
   visibles incluida la brújula, etiquetas y estilo), **Telemetría** (proveedor
   y frecuencia ADS-B) y **Rendimiento** (calidad de malla y texturas del visor
-  3D, resolución de renderizado automática o fija, calidad del mapa 2D,
- perfiles rápidos para equipos modestos y la clave de la fotogrametría 3D).
+  3D, resolución de renderizado automática o fija, calidad del mapa 2D y
+  perfiles rápidos para equipos modestos).
 - **Atajos:** `/` busca · `U` modo limpio · `Esc` cierra.
 
 Todo se guarda en el navegador: al recargar recuperas el proveedor, la
@@ -185,8 +168,6 @@ src/
 │  ├─ aircraftTypes.ts       #    Tipos de aeronave y familias de silueta
 │  ├─ aircraft3d.ts          #    Registro de modelos 3D y escala 1:1
 │  ├─ mapTiles.ts            #    Teselas satelitales y relieve del visor 3D
-│  ├─ photogrammetry.ts      #    Capa opcional de Google 3D Tiles (perezosa)
-│  ├─ photogrammetrySettings.ts # Clave y estado de la capa (sin three.js)
 │  ├─ category.ts            #    Clasificación comercial / carga / GA / militar
 │  ├─ hubs.ts                #    Accesos a aeropuertos (persistencia)
 │  ├─ globalSearch.ts        #    Búsqueda planetaria
@@ -295,10 +276,6 @@ interfaz necesitan cambios.
 - El relieve DEM se decodifica con muestreo reducido en las calidades media y
   baja (4× menos píxeles) y el visor suspende render y descargas con la
   pestaña oculta.
-- La **fotogrametría 3D** es opcional y perezosa: `3d-tiles-renderer` y sus
-  plugins (unos 690 kB) viven en un chunk propio que solo se descarga al
-  activar la capa, nunca al abrir la aplicación. Con la capa apagada —el
-  valor por defecto— el visor usa exactamente el suelo satelital de siempre.
 - La flota simulada avanza a 20 Hz en lugar de una vez por fotograma, con
   giro de rumbo independiente de los FPS: ~3× menos CPU en el modo demo.
 - Probado para una resolución de referencia de 2560 × 1440.
