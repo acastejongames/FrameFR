@@ -29,9 +29,12 @@ import {
   parentCover,
   underlayFor,
   terrainTilesOf,
+  baseSurfaceHeight,
+  sampleHeight,
   tilePosition,
   tileUrl,
   tileZoomForAltitude,
+  windowOffset,
   viewWindow,
 } from '../src/data/mapTiles'
 import { motionTarget, MotionSampler, shortestArcDeg } from '../src/engine/motionSampler'
@@ -43,6 +46,7 @@ import {
   MESH_SEGMENTS,
   MIN_AUTO_RATIO,
   MODEL_MIN_TRIANGLES,
+  cameraNearFor,
   MODEL_SIMPLIFY,
   MODEL_TEXTURE_MAX,
   TERRAIN_STRIDE,
@@ -720,6 +724,77 @@ console.log('· Interpolación de movimiento del visor 3D…')
   sampler.push({ ...last, lat: 45 })
   const afterJump = sampler.stateAt(2000)
   check((afterJump?.lat ?? 0) > 44.9, 'movimiento: el teletransporte reinicia la pista')
+}
+
+console.log('· Capas del suelo del visor 3D…')
+{
+  // The sharp patch and the horizon backdrop keep their world position when
+  // the wide patch re-centres: the offset has to come from the tile indices.
+  let worst = 0
+  for (const lat of [39.55, 39.1, 60.2, -33.9]) {
+    for (const lon of [2.65, 2.05, 151.2]) {
+      for (const altitude of [0, 120, 1200, 6000, 11000]) {
+        const base = viewWindow(lat, lon, altitude, 1)
+        const detail = detailWindow(lat, lon, base.z)
+        const far = farWindow(lat, lon, altitude, base.sizeMeters * 2.5)
+        const d = windowOffset(detail, base)
+        const f = windowOffset(far, base)
+        worst = Math.max(
+          worst,
+          Math.abs(d.east - (detail.offsetEastM - base.offsetEastM)),
+          Math.abs(d.north - (detail.offsetNorthM - base.offsetNorthM)),
+          Math.abs(f.east - (far.offsetEastM - base.offsetEastM)),
+          Math.abs(f.north - (far.offsetNorthM - base.offsetNorthM)),
+        )
+      }
+    }
+  }
+  check(worst < 0.01, `suelo: las capas se anclan por índice de tesela (${worst.toFixed(3)} m)`)
+
+  // A bumpy heightfield: the sharp patch may never sink under the wide mesh.
+  const samples = 129
+  const heights = new Float32Array(samples * samples)
+  for (let y = 0; y < samples; y += 1) {
+    for (let x = 0; x < samples; x += 1) {
+      heights[y * samples + x] = 300 * Math.sin(x / 7) * Math.cos(y / 9) + 40 * Math.sin(x / 2.3)
+    }
+  }
+  const terrain = {
+    heights,
+    samples,
+    window: viewWindow(39.55, 2.65, 1200, 1),
+  }
+  const span = 256
+  let sink = 0
+  let mismatch = 0
+  for (let i = 0; i <= span; i += 8) {
+    for (let j = 0; j <= span; j += 8) {
+      const u = i / span
+      const v = j / span
+      // At the grid vertices the drawn surface is exactly the sampled height.
+      mismatch = Math.max(mismatch, Math.abs(baseSurfaceHeight(terrain, span, u, v) - sampleHeight(terrain, u, v)))
+    }
+  }
+  for (let step = 0; step < 4000; step += 1) {
+    const u = (step * 0.61803398875) % 1
+    const v = (step * 0.38196601125) % 1
+    const coarse = baseSurfaceHeight(terrain, span, u, v)
+    const sharp = Math.max(sampleHeight(terrain, u, v), coarse + 0.2)
+    sink = Math.max(sink, coarse - sharp)
+  }
+  check(mismatch < 1e-3, 'suelo: el parche fino sigue la misma superficie en los vértices')
+  check(sink <= 0, 'suelo: el parche fino nunca queda por debajo del ancho (sin coces)')
+
+  // The near plane follows the orbit: 100× more depth precision at 10 km.
+  check(
+    cameraNearFor(20) >= 0.5 && cameraNearFor(10_000) === 200 && cameraNearFor(1) === 0.5,
+    'suelo: el plano cercano se adapta a la distancia de la cámara',
+  )
+  const precisionAt = (distance: number) => (distance * distance) / (cameraNearFor(distance) * 2 ** 24)
+  check(
+    precisionAt(10_000) < 0.05 && precisionAt(10_000) * 100 < 10_000 ** 2 / (1 * 2 ** 24),
+    'suelo: con el plano cercano adaptativo no hay z-fighting a 10 km',
+  )
 }
 
 console.log('· Limpieza de audio ATC…')

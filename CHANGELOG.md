@@ -1,3 +1,41 @@
+## Suelo del visor sin parpadeos y fotogrametría arreglada — 2026-10-21
+
+- **Fin de las «mallas que chocan» en la vista 3D.** Eran tres capas de suelo
+  peleando por la misma profundidad y por el mismo trozo de terreno:
+  - la capa lejana del horizonte se dibuja ahora **primero y sin escribir
+    profundidad**, así que la malla ancha siempre gana donde se solapan (antes
+    las separaban 2 m, muy por debajo de la precisión del búfer a 10 km);
+  - el parche de detalle se apoya en la **superficie exacta de la malla
+    ancha** (`baseSurfaceHeight`, con la misma triangulación que
+    `PlaneGeometry`) y nunca queda por debajo, que era lo que hacía que la
+    imagen borrosa asomara a través de la nítida;
+  - el plano cercano de la cámara **sigue a la distancia de la órbita**
+    (~100× más precisión de profundidad a 10 km), en vez de quedarse en 1 m
+    contra un plano lejano de 200 km;
+  - al re-centrarse el suelo ya **no se tiran** el parche nítido ni el fondo
+    del horizonte: se recolocan por índice de tesela y se conserva su imagen,
+    así que no hay parpadeo nítido → borroso ni un fotograma sin suelo.
+- **La fotogrametría ya funciona.** Había cuatro fallos encadenados:
+  - la posición de anclaje se pasaba a `ReorientationPlugin` en **grados**
+    cuando el plugin trabaja en **radianes**, así que el tileset se colocaba a
+    decenas de miles de kilómetros;
+  - el marco del plugin es **X-oeste / Z-norte** y la escena es **X-este /
+    Z-sur**: faltaba media vuelta (`azimuth: Math.PI`), de modo que la ciudad
+    habría salido girada 180°;
+  - faltaba el **decodificador Draco** (`GLTFExtensionsPlugin` +
+    `DRACOLoader`, con el `.wasm` servido desde el propio build), sin el cual
+    cada tesela de Google falla al descomprimirse;
+  - al desmontar la capa, el plugin de glTF intentaba cerrar loaders nulos
+    (KTX2) y lanzaba una excepción.
+- **Errores que se entienden:** si Cesium ion rechaza la petición, el visor
+  muestra el motivo (401 token no válido, 403 asset fuera de *My Assets* o sin
+  `assets:read`, 404 asset inexistente, 429 cuota agotada) en un aviso sobre
+  la vista 3D, en lugar de quedarse en «cargando» para siempre.
+- **Pruebas nuevas:** `npm run check:photo` simula Cesium ion y comprueba
+  token, carga de la raíz, ejes, desmontaje y mensaje de error; `npm run
+  smoke` comprueba el anclaje por índice de tesela, que el parche fino nunca
+  se hunda bajo el ancho y la precisión del plano cercano.
+
 ## Reductor de ruido para la radio ATC — 2026-10-20
 
 - El panel **Radio ATC** estrena un selector de limpieza con cuatro niveles:

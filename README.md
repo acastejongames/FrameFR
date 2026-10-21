@@ -133,9 +133,16 @@ completa con:
   detalle** dos niveles de zoom más cerca (con el borde difuminado) y debajo
   una **capa lejana que llega al horizonte real**, así que el suelo nunca
   termina dentro del encuadre ni deja huecos aunque el servidor de teselas
-  limite peticiones. El botón **Calidad** del propio visor permite cambiar
-  al vuelo la malla, las texturas y la resolución de renderizado sin mover la
-  cámara.
+  limite peticiones. Las tres capas están pensadas para no pelearse: el fondo
+  lejano se dibuja primero y sin escribir profundidad, el parche de detalle se
+  apoya en la superficie exacta de la malla ancha (nunca se hunde por debajo)
+  y el plano cercano de la cámara se adapta a la distancia de la órbita para
+  conservar precisión de profundidad a decenas de kilómetros. Las capas
+  tampoco se tiran y se vuelven a pedir al re-centrarse el suelo: mantienen su
+  posición por índice de tesela, así que no hay saltos entre nítido y borroso
+  ni huecos de un fotograma. El botón **Calidad** del propio visor permite
+  cambiar al vuelo la malla, las texturas y la resolución de renderizado sin
+  mover la cámara.
 - **Fotogrametría 3D gratis (Google 3D Tiles vía Cesium ion):** en
   *Calidad* del visor o en **Ajustes › Rendimiento › Fotogrametría 3D** se
   puede activar una capa con el terreno y los edificios reales en 3D, como en
@@ -148,8 +155,12 @@ completa con:
   pide la raíz al abrir la vista y al alejarse 40 km del anclaje, así que cabe
   de sobra; su licencia es para uso personal/no comercial. Sin token, o si
   Cesium o Google lo rechazan, el visor mantiene el satélite + relieve y lo
-  explica en el propio control: la capa es siempre opcional y nunca rompe la
-  vista. El renderizador de teselas se carga en un chunk aparte al activarla,
+  explica con el motivo exacto (token no válido, asset fuera de *My Assets*,
+  cuota agotada…) en el propio visor: la capa es siempre opcional y nunca
+  rompe la vista. Las teselas se colocan en el mismo sistema de ejes que el
+  avión y la cámara (este en +X, arriba en +Y, norte en −Z) y se decodifican
+  con Draco, que es como vienen comprimidas. El renderizador de teselas se
+  carga en un chunk aparte al activarla,
   la densidad (error objetivo y profundidad máxima) acompaña a la calidad de
   malla elegida y, en cuanto llega la primera tesela, el suelo satelital plano
   se oculta para no competir con la geometría real.

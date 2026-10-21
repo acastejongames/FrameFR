@@ -12,7 +12,8 @@
     "audio-lab": "vite build --config scripts/audio-lab.config.ts --logLevel error && node dist-audio-lab/audio-lab.js",
     "smoke": "vite build --config smoke.config.ts --logLevel error && node dist-smoke/smoke.js",
     "check:render": "vite build --config scripts/render.config.ts --logLevel error && node dist-render/render-check.js",
-    "test": "npm run smoke && npm run check:render",
+    "check:photo": "vite build --config photogrammetry.config.ts --logLevel error && node dist-photo/photogrammetry-check.js",
+    "test": "npm run smoke && npm run check:render && npm run check:photo",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

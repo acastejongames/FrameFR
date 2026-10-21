@@ -6,6 +6,7 @@ dist/
 dist-smoke/
 dist-render/
 dist-audio-lab/
+dist-photo/
 
 # Local env
 .env

@@ -15,7 +15,8 @@ export const SATELLITE_TEMPLATE =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 export const MAP_FALLBACK_TEMPLATE = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
 /** Terrarium-encoded elevation tiles: height = R*256 + G + B/256 - 32768. */
-export const TERRAIN_TEMPLATE = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+export const TERRAIN_TEMPLATE =
+  'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
 /**
  * Sky-horizon tint used to melt the ground patch edge into the sky. Must
@@ -108,12 +109,15 @@ export function tileZoomForAltitude(altitudeM: number): number {
 }
 
 /** Fractional world tile coordinates of a position at zoom `z`. */
-export function tilePosition(latDeg: number, lonDeg: number, z: number): { fx: number; fy: number } {
+export function tilePosition(
+  latDeg: number,
+  lonDeg: number,
+  z: number,
+): { fx: number; fy: number } {
   const scale = Math.pow(2, z)
   const latRad = (Math.min(85.05, Math.max(-85.05, latDeg)) * Math.PI) / 180
   const fx = ((lonDeg + 180) / 360) * scale
-  const fy =
-    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale
+  const fy = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale
   return { fx, fy }
 }
 
@@ -124,7 +128,12 @@ export function tilePosition(latDeg: number, lonDeg: number, z: number): { fx: n
  * tiles at z) and the terrain raster (a small block of terrarium tiles at
  * z−2) cover the exact same piece of the world.
  */
-export function groundWindow(latDeg: number, lonDeg: number, z: number, n = GROUND_TILES): GroundWindow {
+export function groundWindow(
+  latDeg: number,
+  lonDeg: number,
+  z: number,
+  n = GROUND_TILES,
+): GroundWindow {
   const { fx, fy } = tilePosition(latDeg, lonDeg, z)
   const x0 = Math.round(fx) - Math.floor(n / 2)
   const y0 = Math.round(fy) - Math.floor(n / 2)
@@ -159,7 +168,12 @@ function viewLayout(mult: number): { zoomOffset: number; n: number } {
  * Ground window at the current render distance: the base altitude window
  * (see `tileZoomForAltitude`) widened `mult` times towards the horizon.
  */
-export function viewWindow(latDeg: number, lonDeg: number, altitudeM: number, mult = 1): GroundWindow {
+export function viewWindow(
+  latDeg: number,
+  lonDeg: number,
+  altitudeM: number,
+  mult = 1,
+): GroundWindow {
   const clamped = Math.max(1, Math.min(5, Math.round(mult)))
   const { zoomOffset, n } = viewLayout(clamped)
   return groundWindow(latDeg, lonDeg, tileZoomForAltitude(altitudeM) - zoomOffset, n)
@@ -497,10 +511,7 @@ export function underlayFor(
  * sharp patch. Its rim is faded to the sky tone, so the terrain melts into the
  * horizon instead of ending on a hard edge.
  */
-export async function fetchFarPatch(
-  win: GroundWindow,
-  signal?: AbortSignal,
-): Promise<GroundPatch> {
+export async function fetchFarPatch(win: GroundWindow, signal?: AbortSignal): Promise<GroundPatch> {
   const canvas = await compositeTiles(
     SATELLITE_TEMPLATE,
     win.z,
@@ -638,6 +649,29 @@ export function farWindow(
   return groundWindow(latDeg, lonDeg, z, FAR_TILES)
 }
 
+/**
+ * Centre of `win` relative to the centre of `base`, in scene metres
+ * (+east, +north).
+ *
+ * Derived from the tile indices instead of the `offset*` fields, so it stays
+ * correct when the two windows were created at different moments: that is what
+ * lets the sharp patch and the horizon backdrop keep their world position when
+ * the wide patch re-centres, without being re-downloaded.
+ */
+export function windowOffset(
+  win: Pick<GroundWindow, 'z' | 'x0' | 'y0' | 'n'>,
+  base: Pick<GroundWindow, 'z' | 'x0' | 'y0' | 'n' | 'sizeMeters'>,
+): { east: number; north: number } {
+  const factor = Math.pow(2, win.z - base.z)
+  const relX = (win.x0 / factor - base.x0) / base.n
+  const relY = (win.y0 / factor - base.y0) / base.n
+  const half = win.n / factor / base.n / 2
+  return {
+    east: (relX + half - 0.5) * base.sizeMeters,
+    north: (0.5 - (relY + half)) * base.sizeMeters,
+  }
+}
+
 /** Window of the sharp patch drawn over the wide one, centred on the plane. */
 export function detailWindow(
   latDeg: number,
@@ -686,8 +720,17 @@ export async function fetchTerrainPatch(
   signal?: AbortSignal,
   stride = 1,
 ): Promise<TerrainPatch | null> {
-  const { z, x0, y0, offsetX, offsetY, blockX, blockY, samples, stride: step } =
-    terrainTilesOf(win, stride)
+  const {
+    z,
+    x0,
+    y0,
+    offsetX,
+    offsetY,
+    blockX,
+    blockY,
+    samples,
+    stride: step,
+  } = terrainTilesOf(win, stride)
   const heights = new Float32Array(samples * samples)
   const ctxOf = (img: HTMLImageElement): ImageData | null => {
     const canvas = document.createElement('canvas')
@@ -717,7 +760,9 @@ export async function fetchTerrainPatch(
   const overlapsWindow = (index: number): boolean => {
     const sx = (index % blockX) * TILE_PX
     const sy = Math.floor(index / blockX) * TILE_PX
-    return sx < offsetX + span && sx + TILE_PX > offsetX && sy < offsetY + span && sy + TILE_PX > offsetY
+    return (
+      sx < offsetX + span && sx + TILE_PX > offsetX && sy < offsetY + span && sy + TILE_PX > offsetY
+    )
   }
   if (decoded.some((tile, index) => !tile && overlapsWindow(index))) return null
   // Walk the output grid directly: with `stride` 2 this decodes a quarter of
@@ -733,8 +778,62 @@ export async function fetchTerrainPatch(
       if (!tile) continue
       const px = sx - tileX * TILE_PX
       const i = (py * TILE_PX + px) * 4
-      heights[dy * samples + dx] = decodeTerrariumPixel(tile.data[i], tile.data[i + 1], tile.data[i + 2])
+      heights[dy * samples + dx] = decodeTerrariumPixel(
+        tile.data[i],
+        tile.data[i + 1],
+        tile.data[i + 2],
+      )
     }
   }
   return { heights, samples, window: win }
+}
+
+/** Bilinear terrain sample at window coordinates (row 0 = north edge). */
+export function sampleHeight(terrain: TerrainPatch, u: number, v: number): number {
+  const { heights, samples } = terrain
+  const fx = u * (samples - 1)
+  const fy = v * (samples - 1)
+  const x0 = Math.floor(fx)
+  const y0 = Math.floor(fy)
+  const x1 = Math.min(x0 + 1, samples - 1)
+  const y1 = Math.min(y0 + 1, samples - 1)
+  const tx = fx - x0
+  const ty = fy - y0
+  const h00 = heights[y0 * samples + x0]
+  const h10 = heights[y0 * samples + x1]
+  const h01 = heights[y1 * samples + x0]
+  const h11 = heights[y1 * samples + x1]
+  return h00 * (1 - tx) * (1 - ty) + h10 * tx * (1 - ty) + h01 * (1 - tx) * ty + h11 * tx * ty
+}
+
+/**
+ * Height of a ground patch **as three.js draws it**, at coordinates of its own
+ * grid.
+ *
+ * `PlaneGeometry` splits every cell into two triangles (from (u, v+1) to
+ * (u+1, v)). A sharper patch samples the DEM more finely, so its surface
+ * crosses the coarse one wherever the terrain is not flat: the coarse mesh then
+ * pokes through the sharp one, and the two images flicker against each other
+ * while the camera moves. Reproducing the coarse triangle gives the sharp patch
+ * a floor it can never sink below.
+ */
+export function baseSurfaceHeight(
+  terrain: TerrainPatch | null,
+  span: number,
+  u: number,
+  v: number,
+): number {
+  if (!terrain || span <= 0) return 0
+  const fx = Math.min(Math.max(u, 0), 1) * span
+  const fy = Math.min(Math.max(v, 0), 1) * span
+  const ix = Math.min(Math.floor(fx), Math.max(span - 1, 0))
+  const iy = Math.min(Math.floor(fy), Math.max(span - 1, 0))
+  const tx = fx - ix
+  const ty = fy - iy
+  const h00 = sampleHeight(terrain, ix / span, iy / span)
+  const h10 = sampleHeight(terrain, (ix + 1) / span, iy / span)
+  const h01 = sampleHeight(terrain, ix / span, (iy + 1) / span)
+  const h11 = sampleHeight(terrain, (ix + 1) / span, (iy + 1) / span)
+  if (tx + ty <= 1) return h00 + tx * (h10 - h00) + ty * (h01 - h00)
+  return h01 + h10 - h11 + tx * (h11 - h01) + ty * (h11 - h10)
 }

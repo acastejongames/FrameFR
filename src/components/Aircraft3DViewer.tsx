@@ -19,6 +19,7 @@ import {
   QUALITY_TIERS,
   RENDER_RESOLUTIONS,
   RESOLUTION_LABELS,
+  cameraNearFor,
   TERRAIN_STRIDE,
   isPerformanceSettings,
   normalizePerformance,
@@ -28,14 +29,18 @@ import {
   type RenderResolution,
 } from '@/data/quality'
 import {
+  DETAIL_ZOOM_JUMP,
+  VIEW_DISTANCES,
+  baseSurfaceHeight,
   detailWindow,
   farWindow,
   fetchFarPatch,
   fetchGroundDetail,
   fetchGroundPatch,
   fetchTerrainPatch,
-  VIEW_DISTANCES,
+  sampleHeight,
   viewWindow,
+  windowOffset,
   type GroundPatch,
   type GroundWindow,
   type TerrainPatch,
@@ -65,6 +70,8 @@ const GROUND_BG = 0x0d1218
 const REFRESH_DRIFT_M = 2_000
 /** Orbit damping time constant, seconds (applied per frame, frame-rate independent). */
 const DAMPING_TAU_S = 0.22
+/** How far the plane may leave the sharp patch before it is renewed. */
+const DETAIL_DRIFT_FRACTION = 0.22
 /** Resolution governor: measurement window and warm-up before adapting. */
 const ADAPT_WINDOW_MS = 2_000
 const ADAPT_WARMUP_MS = 4_000
@@ -81,6 +88,10 @@ interface SceneState {
   detailObject: THREE.Object3D | null
   detailWindow: GroundWindow | null
   detailToken: number
+  /** Imagery of the sharp patch, kept across wide-patch refreshes. */
+  detailCanvas: HTMLCanvasElement | null
+  /** Where the sharp patch was fetched, to know when it has to be renewed. */
+  detailCentre: { lat: number; lon: number } | null
   /** Optional photogrammetric tiles from Cesium ion (null when off). */
   photogrammetry: PhotogrammetryHandle | null
   photoAnchor: { lat: number; lon: number } | null
@@ -184,6 +195,8 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
   const photogrammetryRef = useRef(photogrammetryOn)
   photogrammetryRef.current = photogrammetryOn
   const [photoState, setPhotoState] = useState<PhotogrammetryState>('off')
+  /** Why the layer failed (empty unless `photoState` is 'error'). */
+  const [photoError, setPhotoError] = useState('')
   const photoStateRef = useRef<PhotogrammetryState>('off')
   photoStateRef.current = photoState
   // Attribution the tiles themselves require (Google, data providers…).
@@ -221,6 +234,7 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
     const { on, token: ionToken } = photoRefs.current
     if (!on || !ionToken) {
       teardownPhotogrammetry(state)
+      setPhotoError('')
       // Two different situations for the hint: the layer is simply off, or it
       // is on but this browser has no Cesium ion token yet.
       setPhotoState(on ? 'nokey' : 'off')
@@ -247,6 +261,7 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
     state.photoSignature = signature
     state.photoPending = true
     setPhotoState('loading')
+    setPhotoError('')
     // The tiles renderer is a heavy module: it only loads when the feature is
     // actually requested.
     void import('@/data/photogrammetry')
@@ -256,6 +271,10 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
           lat: aircraft.lat,
           lon: aircraft.lon,
           quality: mesh,
+          onError: (message) => {
+            if (!state || state.disposed || generation !== state.photoToken) return
+            setPhotoError(message)
+          },
           onState: (next) => {
             if (!state || state.disposed || generation !== state.photoToken) return
             setPhotoState(next)
@@ -366,6 +385,8 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         detailObject: null,
         detailWindow: null,
         detailToken: 0,
+        detailCanvas: null,
+        detailCentre: null,
         photogrammetry: null,
         photoAnchor: null,
         photoSignature: '',
@@ -614,9 +635,32 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
           }
         }
 
+        if (now >= state.nextGroundCheckAt) {
+          state.nextGroundCheckAt = now + 500
+          requestGround(state, motion, live, setGroundLoading, setAttribution, rangeRef.current)
+        }
+
+        // Time-based damping: the orbit settles in the same time at any fps.
+        const dtS = state.lastFrameAt ? Math.min((now - state.lastFrameAt) / 1000, 0.5) : 1 / 60
+        state.lastFrameAt = now
+        state.controls.dampingFactor = 1 - Math.exp(-dtS / DAMPING_TAU_S)
+        state.controls.update()
+
+        // Depth precision follows the orbit: without this, the layers of ground
+        // two metres apart fight for the same depth values beyond a few km.
+        const orbit = state.camera.position.distanceTo(state.controls.target)
+        const near = cameraNearFor(orbit)
+        if (Math.abs(near - state.camera.near) > state.camera.near * 0.25) {
+          state.camera.near = near
+          state.camera.updateProjectionMatrix()
+        }
+        state.camera.updateMatrixWorld()
+
         if (state.photogrammetry) {
           const photo = state.photogrammetry
           offsetPhotogrammetry(state, motion ?? live)
+          // The tiles need the camera matrix of *this* frame: updating them
+          // before the orbit was applied made every tile decision one frame old.
           photo.update(state.camera, state.renderer)
           if (now >= state.nextAttributionAt) {
             state.nextAttributionAt = now + 2000
@@ -640,16 +684,6 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
           setPhotoAttribution('')
         }
 
-        if (now >= state.nextGroundCheckAt) {
-          state.nextGroundCheckAt = now + 500
-          requestGround(state, motion, live, setGroundLoading, setAttribution, rangeRef.current)
-        }
-
-        // Time-based damping: the orbit settles in the same time at any fps.
-        const dtS = state.lastFrameAt ? Math.min((now - state.lastFrameAt) / 1000, 0.5) : 1 / 60
-        state.lastFrameAt = now
-        state.controls.dampingFactor = 1 - Math.exp(-dtS / DAMPING_TAU_S)
-        state.controls.update()
         if (container.clientWidth > 0 && container.clientHeight > 0) {
           state.renderer.render(state.scene, state.camera)
         }
@@ -831,6 +865,15 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
         </div>
       </div>
 
+      {photogrammetryOn && photoState === 'error' && photoError && (
+        <div className="pointer-events-none absolute left-3 top-[5.4rem] max-w-[min(420px,calc(100vw-1.5rem))]">
+          <div className="tech rounded border border-[#ffbe0066] bg-[#ffbe001f] px-3 py-2 text-[10px] leading-snug text-[#ffe6a8]">
+            <strong className="font-semibold text-[#ffd158]">Fotogrametría 3D: </strong>
+            {photoError}
+          </div>
+        </div>
+      )}
+
       <button
         type="button"
         onClick={onClose}
@@ -966,7 +1009,8 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
                     ? photoState === 'ready'
                       ? 'Google 3D Tiles vía Cesium ion · terreno y edificios reales.'
                       : photoState === 'error'
-                        ? 'Cesium ion rechazó el token: se mantiene el satélite + relieve.'
+                        ? photoError ||
+                          'Cesium ion rechazó el token: se mantiene el satélite + relieve.'
                         : photoState === 'nokey'
                           ? 'Añade tu token gratuito de Cesium ion en Ajustes › Fotogrametría 3D.'
                           : 'Cargando fotogrametría desde Cesium ion…'
@@ -1230,20 +1274,28 @@ function requestGround(
     })
 }
 
-/** Ground plane for a window, with the DEM relief sampled over a UV sub-rect. */
+/**
+ * Ground plane for a window, with the DEM relief sampled over a UV sub-rect.
+ *
+ * `heightAt` overrides the DEM sampling; the sharp patch uses it to sit on the
+ * surface of the wide mesh instead of on its own interpolation of the DEM.
+ */
 function groundGeometry(
   win: GroundWindow,
   terrain: TerrainPatch | null,
   span: number,
   uv: { u0: number; v0: number; du: number; dv: number } = { u0: 0, v0: 0, du: 1, dv: 1 },
+  heightAt?: (u: number, v: number) => number,
 ): THREE.PlaneGeometry {
   const geometry = new THREE.PlaneGeometry(win.sizeMeters, win.sizeMeters, span, span)
   const positions = geometry.attributes.position as THREE.BufferAttribute
   for (let j = 0; j <= span; j++) {
     for (let i = 0; i <= span; i++) {
-      const height = terrain
-        ? sampleHeight(terrain, uv.u0 + (i / span) * uv.du, uv.v0 + (j / span) * uv.dv)
-        : 0
+      const u = uv.u0 + (i / span) * uv.du
+      const v = uv.v0 + (j / span) * uv.dv
+      let height: number
+      if (heightAt) height = heightAt(u, v)
+      else height = terrain ? sampleHeight(terrain, u, v) : 0
       positions.setZ(j * (span + 1) + i, height)
     }
   }
@@ -1266,6 +1318,7 @@ function groundMaterial(
   state: SceneState,
   canvas: HTMLCanvasElement,
   detail = false,
+  backdrop = false,
 ): THREE.MeshBasicMaterial {
   const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
@@ -1276,7 +1329,15 @@ function groundMaterial(
   return new THREE.MeshBasicMaterial({
     map: texture,
     transparent: detail,
-    depthWrite: !detail,
+    // The wide patch is the only layer that writes depth. The backdrop is
+    // always behind it and the sharp patch always in front, so neither needs
+    // to fight for the same depth values.
+    depthWrite: !detail && !backdrop,
+    // Depth bias for the sharp patch: it sits on the wide mesh, and at long
+    // orbit radii both fall inside the same depth quantum.
+    polygonOffset: detail,
+    polygonOffsetFactor: detail ? -2 : 0,
+    polygonOffsetUnits: detail ? -2 : 0,
     fog: true,
   })
 }
@@ -1284,11 +1345,13 @@ function groundMaterial(
 /** Removes the sharp patch (the wide one no longer matches it). */
 function dropDetail(state: SceneState): void {
   state.detailToken += 1
+  state.detailWindow = null
+  state.detailCanvas = null
+  state.detailCentre = null
   if (!state.detailObject) return
   state.groundGroup.remove(state.detailObject)
   disposeObject3D(state.detailObject)
   state.detailObject = null
-  state.detailWindow = null
 }
 
 /**
@@ -1305,6 +1368,18 @@ function requestDetail(
   const base = state.patchWindow
   if (!patch.canvas || !base || state.quality.textures !== 'alta') return
   const win = detailWindow(position.lat, position.lon, base.z)
+  // Keeping the current patch while the plane is near its centre is what stops
+  // the middle of the view from pulsing sharp → blurry → sharp every time the
+  // wide patch refreshes (every couple of kilometres).
+  const current = state.detailWindow
+  const centre = state.detailCentre
+  if (current && centre && current.z === win.z) {
+    const drift = Math.hypot(
+      (position.lat - centre.lat) * EARTH_M_PER_DEG,
+      (position.lon - centre.lon) * EARTH_M_PER_DEG * Math.cos((centre.lat * Math.PI) / 180),
+    )
+    if (drift < current.sizeMeters * DETAIL_DRIFT_FRACTION) return
+  }
   const canvas = patch.canvas
   const token = ++state.detailToken
   void fetchGroundDetail(
@@ -1318,6 +1393,7 @@ function requestDetail(
       if (state.disposed || token !== state.detailToken) return
       if (state.patchWindow !== base || !detail) return
       applyDetail(state, detail, win, terrain, base)
+      state.detailCentre = { lat: position.lat, lon: position.lon }
     })
     .catch(() => undefined)
 }
@@ -1337,19 +1413,25 @@ function applyDetail(
   const v0 = (win.y0 / span - base.y0) / base.n
   const size = win.n / span / base.n
   const segments = Math.max(32, Math.round(MESH_SEGMENTS[state.quality.mesh] / 2))
-  const geometry = groundGeometry(win, terrain, segments, { u0, v0, du: size, dv: size })
+  const baseSpan = MESH_SEGMENTS[state.quality.mesh]
+  // Fine relief, but never below the wide mesh: a mesh that sinks under its
+  // underlay shows the blurry image through the sharp one.
+  const heightAt = terrain
+    ? (u: number, v: number) =>
+        Math.max(sampleHeight(terrain, u, v), baseSurfaceHeight(terrain, baseSpan, u, v) + 0.2)
+    : undefined
+  const geometry = groundGeometry(win, terrain, segments, { u0, v0, du: size, dv: size }, heightAt)
   const mesh = new THREE.Mesh(geometry, groundMaterial(state, canvas, true))
   mesh.renderOrder = 2
-  // Relative to the wide patch centre: `groundGroup` already carries the
-  // patch position and the drift, and this mesh is a child of it.
-  mesh.position.set(
-    win.offsetEastM - base.offsetEastM,
-    1.5,
-    -(win.offsetNorthM - base.offsetNorthM),
-  )
+  // Relative to the wide patch centre, from the tile indices: `groundGroup`
+  // already carries the patch position and the drift, and this mesh is a child
+  // of it.
+  const offset = windowOffset(win, base)
+  mesh.position.set(offset.east, 0.5, -offset.north)
   state.groundGroup.add(mesh)
   state.detailObject = mesh
   state.detailWindow = win
+  state.detailCanvas = canvas
 }
 
 /**
@@ -1395,14 +1477,14 @@ function requestFarGround(
       }
       const geometry = new THREE.PlaneGeometry(win.sizeMeters, win.sizeMeters, 1, 1)
       geometry.rotateX(-Math.PI / 2)
-      const mesh = new THREE.Mesh(geometry, groundMaterial(state, patch.canvas))
-      mesh.renderOrder = 0
-      // Under everything: the sharp patch always wins where they overlap.
-      mesh.position.set(
-        win.offsetEastM - base.offsetEastM,
-        -2,
-        -(win.offsetNorthM - base.offsetNorthM),
-      )
+      // A backdrop, not another ground: drawn first and without depth writes,
+      // so the wide patch always wins where they overlap (the 2 m gap is below
+      // the depth resolution at horizon distances, and that flicker is what
+      // read as two meshes fighting).
+      const mesh = new THREE.Mesh(geometry, groundMaterial(state, patch.canvas, false, true))
+      mesh.renderOrder = -1
+      const offset = windowOffset(win, base)
+      mesh.position.set(offset.east, -2, -offset.north)
       state.groundGroup.add(mesh)
       state.farObject = mesh
       state.farWindow = win
@@ -1426,6 +1508,27 @@ function requestFarGround(
       if (state.disposed || token !== state.farToken) return
       state.farFetching = false
     })
+}
+
+/**
+ * True when the sharp patch of `win` still fits inside the wide patch `base`.
+ *
+ * The patch covers a quarter of the wide side two zoom levels up; a change of
+ * tier or altitude can move the wide window under it.
+ */
+function reusableDetail(
+  detail: GroundWindow,
+  base: GroundWindow,
+  textureTier: QualityTier,
+): boolean {
+  if (textureTier !== 'alta' || detail.z !== base.z + DETAIL_ZOOM_JUMP) return false
+  const factor = 1 << DETAIL_ZOOM_JUMP
+  return (
+    detail.x0 >= base.x0 * factor &&
+    detail.x0 + detail.n <= (base.x0 + base.n) * factor &&
+    detail.y0 >= base.y0 * factor &&
+    detail.y0 + detail.n <= (base.y0 + base.n) * factor
+  )
 }
 
 /** Replaces the ground object with a textured terrain mesh (or a grid). */
@@ -1456,9 +1559,13 @@ function applyPatch(
     state.groundObject = null
   }
 
-  // The wide patch changes as a whole: the previous sharp patch no longer
-  // matches the new anchor.
-  dropDetail(state)
+  // The sharp patch keeps its imagery: it is re-fitted to the new wide patch
+  // below instead of being dropped, which used to make the centre of the view
+  // jump between sharp and blurry on every refresh.
+  const previousDetail =
+    state.detailCanvas && state.detailWindow
+      ? { canvas: state.detailCanvas, window: state.detailWindow, centre: state.detailCentre }
+      : null
 
   if (patch.canvas) {
     const geometry = groundGeometry(win, terrain, MESH_SEGMENTS[state.quality.mesh])
@@ -1469,13 +1576,19 @@ function applyPatch(
   }
   state.groundGroup.add(state.groundObject)
   state.patchWindow = win
-  state.farToken += 1
-  state.farFetching = false
-  if (state.farObject) {
-    state.groundGroup.remove(state.farObject)
-    disposeObject3D(state.farObject)
-    state.farObject = null
-    state.farWindow = null
+  // The horizon backdrop stays on screen: only its position relative to the
+  // new wide patch is recomputed. Dropping it here left a frame without ground
+  // and re-downloaded the whole cover every few kilometres.
+  if (state.farObject && state.farWindow) {
+    const farOffset = windowOffset(state.farWindow, win)
+    state.farObject.position.set(farOffset.east, state.farObject.position.y, -farOffset.north)
+  }
+  if (previousDetail && reusableDetail(previousDetail.window, win, state.quality.textures)) {
+    applyDetail(state, previousDetail.canvas, previousDetail.window, terrain, win)
+    state.detailCentre = previousDetail.centre ?? { lat: position.lat, lon: position.lon }
+  } else if (previousDetail) {
+    // The wide patch changed tier or zoom: the sharp patch no longer matches.
+    dropDetail(state)
   }
   state.terrain = terrain
   state.anchorLat = position.lat
@@ -1490,22 +1603,4 @@ function applyPatch(
     Math.max(win.sizeMeters * 0.75, farSize * 0.44),
   )
   state.camera.far = Math.max(200_000, farSize * 0.8, win.sizeMeters * 1.1)
-}
-
-/** Bilinear terrain sample at plane UV coordinates (row 0 = north edge). */
-function sampleHeight(terrain: TerrainPatch, u: number, v: number): number {
-  const { heights, samples } = terrain
-  const fx = u * (samples - 1)
-  const fy = v * (samples - 1)
-  const x0 = Math.floor(fx)
-  const y0 = Math.floor(fy)
-  const x1 = Math.min(x0 + 1, samples - 1)
-  const y1 = Math.min(y0 + 1, samples - 1)
-  const tx = fx - x0
-  const ty = fy - y0
-  const h00 = heights[y0 * samples + x0]
-  const h10 = heights[y0 * samples + x1]
-  const h01 = heights[y1 * samples + x0]
-  const h11 = heights[y1 * samples + x1]
-  return h00 * (1 - tx) * (1 - ty) + h10 * tx * (1 - ty) + h01 * (1 - tx) * ty + h11 * tx * ty
 }

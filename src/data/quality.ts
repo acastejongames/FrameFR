@@ -106,6 +106,19 @@ export const TEXTURE_ANISOTROPY: Record<QualityTier, number> = {
   baja: 1,
 }
 
+/**
+ * Near plane of the 3D viewer at a given orbit radius.
+ *
+ * A fixed 1 m near plane with a 200 km far plane leaves about 6 m of depth
+ * resolution at 10 km, which is the scale at which the wide patch, the sharp
+ * patch and the horizon backdrop start to flicker against each other. Scaling
+ * the near plane with the distance multiplies the usable depth precision by
+ * ~100 and still shows the closest orbit (~20 m).
+ */
+export function cameraNearFor(distance: number): number {
+  return Math.max(0.5, Math.min(distance * 0.02, 500))
+}
+
 /** Lowest automatic pixel ratio the viewer may negotiate down to. */
 export const MIN_AUTO_RATIO = 0.75
 

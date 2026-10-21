@@ -46,18 +46,49 @@ function plainText(html: string): string {
     .trim()
 }
 
+/** Radians per degree (the ion plugins take radians, not degrees). */
+const DEG = Math.PI / 180
+
+/**
+ * Human-readable reason for a failed request, so the viewer can say *why* the
+ * layer stayed off instead of a generic "error".
+ */
+function describeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  const status = Number(message.match(/error code (\d{3})/)?.[1] ?? 0)
+  if (status === 400 || status === 401) {
+    return 'Cesium ion rechazó el token (401). Cópialo completo desde ion.cesium.com/tokens.'
+  }
+  if (status === 403) {
+    return 'El token no incluye el asset 2275207 (403): añádelo a My Assets y crea el token con assets:read.'
+  }
+  if (status === 404) {
+    return 'El asset de Google 3D Tiles no está en tu cuenta de Cesium ion (404).'
+  }
+  if (status === 429) {
+    return 'Cuota gratuita de Cesium ion agotada (429): 1.000 peticiones del tileset raíz al mes.'
+  }
+  if (status >= 500) return `Cesium ion no responde (${status}).`
+  if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
+    return 'No se pudo conectar con Cesium ion (red o bloqueo del navegador).'
+  }
+  return message ? `Fotogrametría no disponible: ${message}` : 'Fotogrametría no disponible.'
+}
+
 export interface CreatePhotogrammetryOptions {
   token: string
   lat: number
   lon: number
   quality: QualityTier
   onState: (state: PhotogrammetryState) => void
+  /** Reason of a fatal failure (already localised), for the settings hints. */
+  onError?: (message: string) => void
 }
 
 /**
  * Builds the tiles renderer anchored at a position.
  *
- * The tiles are placed in their own local frame (up = +Y, north = -Z, metres)
+ * The tiles are placed in their own local frame (up = +Y, north = −Z, metres)
  * via `ReorientationPlugin`, which is the same frame as the rest of the
  * viewer, so the aircraft, its altitude and the camera keep working unchanged.
  */
@@ -65,9 +96,14 @@ export async function loadPhotogrammetry(
   options: CreatePhotogrammetryOptions,
 ): Promise<PhotogrammetryHandle> {
   const { TilesRenderer } = await import('3d-tiles-renderer')
-  const { CesiumIonAuthPlugin, ReorientationPlugin } = await import('3d-tiles-renderer/plugins')
-  const { token, lat, lon, quality, onState } = options
+  const { CesiumIonAuthPlugin, GLTFExtensionsPlugin, ReorientationPlugin } = await import(
+    '3d-tiles-renderer/plugins'
+  )
+  // Google's tiles are Draco-compressed; without the decoder every tile fails.
+  const { DRACOLoader } = await import('three/examples/jsm/loaders/DRACOLoader.js')
+  const { token, lat, lon, quality, onState, onError } = options
 
+  const draco = new DRACOLoader()
   const tiles = new TilesRenderer()
   // Ion resolves the asset endpoint (and, for Google tiles, the session key).
   tiles.registerPlugin(
@@ -80,7 +116,21 @@ export async function loadPhotogrammetry(
       useRecommendedSettings: false,
     }),
   )
-  tiles.registerPlugin(new ReorientationPlugin({ lat, lon, height: 0, recenter: false }))
+  // `autoDispose` would call `dispose()` on the KTX2 loader we do not pass.
+  tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco, autoDispose: false }))
+  tiles.registerPlugin(
+    new ReorientationPlugin({
+      // **Radians**: passing degrees put the whole city tens of thousands of
+      // kilometres away, which looked like the layer doing nothing.
+      lat: lat * DEG,
+      lon: lon * DEG,
+      height: 0,
+      // The plugin's object frame is X-west / Z-north; the viewer is
+      // X-east / Z-south. Half a turn puts the tiles in the same frame.
+      azimuth: Math.PI,
+      recenter: false,
+    }),
+  )
   tiles.errorTarget = ERROR_TARGET[quality]
   tiles.maxDepth = MAX_DEPTH[quality]
   tiles.autoDisableRendererCulling = false
@@ -99,17 +149,21 @@ export async function loadPhotogrammetry(
     loadedOnce = true
     finish('ready')
   })
-  tiles.addEventListener('load-error', (event: { tile: unknown }) => {
+  tiles.addEventListener('load-error', (event: { tile: unknown; error?: unknown }) => {
     // A `null` tile is the root request: bad token, quota exhausted or the
     // asset missing from "My Assets". That is fatal for the layer.
     if (event.tile === null) {
+      onError?.(describeError(event.error))
       finish('error')
       return
     }
     // Individual tile failures are normal (coverage gaps, rate limits): only
     // give up when nothing has been shown and the errors pile up.
     tileErrors += 1
-    if (!loadedOnce && tileErrors > MAX_TILE_ERRORS) finish('error')
+    if (!loadedOnce && tileErrors > MAX_TILE_ERRORS) {
+      onError?.('Cesium ion devolvió teselas vacías para esta zona.')
+      finish('error')
+    }
   })
 
   return {
@@ -131,6 +185,7 @@ export async function loadPhotogrammetry(
     dispose: () => {
       tiles.dispose()
       tiles.group.removeFromParent()
+      draco.dispose()
     },
   }
 }
