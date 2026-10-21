@@ -57,7 +57,7 @@ function describeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? '')
   const status = Number(message.match(/error code (\d{3})/)?.[1] ?? 0)
   if (status === 400 || status === 401) {
-    return 'Cesium ion rechazó el token (401). Cópialo completo desde ion.cesium.com/tokens.'
+    return 'Cesium ion rechazó el token (401). Cópialo completo desde ion.cesium.com/tokens; si lo restringiste por URL, añade acastejongames.github.io.'
   }
   if (status === 403) {
     return 'El token no incluye el asset 2275207 (403): añádelo a My Assets y crea el token con assets:read.'
