@@ -43,6 +43,7 @@ import { SphereGeometry } from 'three'
 import { simplifyGeometry, triangleCount } from '../src/data/aircraft3dModels'
 import {
   GROUND_TILE_PX,
+  GROUND_ZOOM_BONUS,
   MESH_SEGMENTS,
   MIN_AUTO_RATIO,
   MODEL_MIN_TRIANGLES,
@@ -67,7 +68,7 @@ import {
  * Run with:  npm run smoke
  */
 import { forecastPoints, latestRadar, normalizeForecastGrid, sectorForViewport, sectorSafelyCovers } from '../src/data/weather'
-import { classifyBasemapLayer } from '../src/map/style'
+import { BASEMAPS, basemapSource, classifyBasemapLayer, getBasemap } from '../src/map/style'
 import { DemoProvider } from '../src/data/providers/demoProvider'
 import { distanceNm } from '../src/data/geo'
 import { resolveSearchIntent } from '../src/data/globalSearch'
@@ -487,6 +488,31 @@ console.log('· Meteorología: sectores estables, valores ausentes y radar…')
 
 console.log('· Clasificación de elementos del mapa base…')
 {
+  // Mapa 2D con imagen satelital: mismo ráster que el suelo del visor 3D,
+  // servido como estilo propio de MapLibre (sin clave ni registro).
+  const satellite = getBasemap('satellite')
+  const satelliteStyle = basemapSource(satellite)
+  check(satellite.label === 'Satélite', 'mapa 2D: el satélite está en la lista de estilos')
+  check(BASEMAPS.every((option) => Boolean(basemapSource(option))), 'mapa 2D: todos los estilos tienen origen')
+  check(
+    typeof satelliteStyle === 'object' &&
+      satelliteStyle.sources.satellite?.type === 'raster' &&
+      satelliteStyle.sources.satellite.tiles?.[0]?.includes('World_Imagery'),
+    'mapa 2D: el satélite usa el ráster Esri World Imagery',
+  )
+  check(
+    typeof satelliteStyle === 'object' &&
+      satelliteStyle.layers[0]?.type === 'background' &&
+      satelliteStyle.layers[1]?.type === 'raster',
+    'mapa 2D: fondo oscuro debajo de la imagen (sin destello blanco)',
+  )
+  check(
+    typeof satelliteStyle === 'object' &&
+      satelliteStyle.sources.satellite.attribution?.includes('Esri'),
+    'mapa 2D: el crédito de Esri viaja con el estilo',
+  )
+  check(typeof basemapSource(getBasemap('dark')) === 'string', 'mapa 2D: los estilos vectoriales siguen por URL')
+
   const city = classifyBasemapLayer({ id: 'label_city', type: 'symbol', 'source-layer': 'place', layout: { 'icon-image': 'circle', 'text-field': ['get', 'name'] } })
   check(city.placeIcon && city.name && !city.border, 'mapa: icono y nombre de ciudad separables')
   const poi = classifyBasemapLayer({ id: 'poi_r1', type: 'symbol', 'source-layer': 'poi', layout: { 'icon-image': ['get', 'class'], 'text-field': ['get', 'name'] } })
@@ -594,6 +620,21 @@ console.log('· Teselas del terreno del visor 3D…')
     'teselas: el DEM de ×5 cubre su ventana',
   )
   check(viewWindow(40, -3.5, 11_000, 9).n === 10, 'teselas: la distancia se recorta en 5')
+  // Calidad del terreno: el nivel extra de zoom da la mitad de metros por
+  // píxel con el mismo número de teselas, y el detalle sube con él.
+  const sharp = viewWindow(40, -3.5, 11_000, 1, GROUND_ZOOM_BONUS.alta)
+  check(sharp.z === base.z + GROUND_ZOOM_BONUS.alta && sharp.n === base.n, 'teselas: el nivel alto sube un zoom')
+  check(
+    Math.abs(sharp.sizeMeters - base.sizeMeters / 2) < 1,
+    'teselas: el nivel alto cubre la mitad de lado',
+  )
+  check(
+    Math.abs(metersPerPixel(45, sharp.z) - metersPerPixel(45, base.z) / 2) < 0.01,
+    'teselas: el nivel alto duplica la nitidez por píxel',
+  )
+  check(GROUND_ZOOM_BONUS.media === 0 && GROUND_ZOOM_BONUS.baja === 0, 'teselas: media y baja mantienen la ventana')
+  check(viewWindow(40, -3.5, 11_000, 1, 40).z === 19, 'teselas: el zoom extra nunca pasa de 19')
+  check(detailWindow(40, -3.5, 18).z === 19, 'teselas: el detalle también se corta en 19')
   const detail = detailWindow(40, -3.5, 11)
   check(
     detail.z === 11 + DETAIL_ZOOM_JUMP && detail.n === DETAIL_TILES,

@@ -62,6 +62,20 @@ export const MESH_SEGMENTS: Record<QualityTier, number> = {
 }
 
 /**
+ * Extra tile zoom levels for the viewer ground, per mesh tier.
+ *
+ * One more level halves the metres each texture pixel covers (4× sharper
+ * imagery) and halves the covered window, which the horizon backdrop already
+ * fills; the number of tile requests stays the same. On the top tier this is
+ * what makes the ground read as photography instead of a blurry wash.
+ */
+export const GROUND_ZOOM_BONUS: Record<QualityTier, number> = {
+  alta: 1,
+  media: 0,
+  baja: 0,
+}
+
+/**
  * DEM sample stride: 1 reads every Terrarium pixel, 2 halves the decoded
  * heightfield per side (4× fewer samples) without visibly changing the relief.
  */

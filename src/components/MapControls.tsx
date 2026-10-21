@@ -11,6 +11,7 @@ import {
   Mountain,
   Check,
   MapPin,
+  Satellite,
   Type,
   Landmark,
 } from 'lucide-react'
@@ -35,8 +36,18 @@ interface MapControlsProps {
   onLocate: () => void
   visible: boolean
 }
-const STYLES = BASEMAPS.map(style => ({ ...style,
-  icon: style.id === 'dark' ? Moon : style.id === '3d' ? Compass : style.id === 'liberty' || style.id === 'fiord' ? Mountain : Sun,
+const STYLES = BASEMAPS.map((style) => ({
+  ...style,
+  icon:
+    style.id === 'dark'
+      ? Moon
+      : style.id === '3d'
+        ? Compass
+        : style.id === 'liberty' || style.id === 'fiord'
+          ? Mountain
+          : style.id === 'satellite'
+            ? Satellite
+            : Sun,
 }))
 
 export function MapControls({
@@ -103,27 +114,44 @@ export function MapControls({
             </button>
           ))}
         </div>
-        <div className="map-layer-toggles" role="group" aria-label="Elementos del mapa base">
-          <h3>Elementos del mapa</h3>
-          {([
-            ['placeIcons', 'Iconos de lugares', 'Pines, puntos de población y POI', MapPin],
-            ['names', 'Nombres', 'Ciudades, países, vías y masas de agua', Type],
-            ['borders', 'Fronteras', 'Límites administrativos', Landmark],
-          ] as const).map(([key, label, description, Icon]) => (
-            <button
-              key={key}
-              type="button"
-              className="map-layer-toggle"
-              aria-pressed={mapLayers[key]}
-              onClick={() => onMapLayersChange({ ...mapLayers, [key]: !mapLayers[key] })}
-            >
-              <Icon size={18} />
-              <span><strong>{label}</strong><small>{description}</small></span>
-              <span className="toggle-state" aria-hidden="true">{mapLayers[key] ? 'Visible' : 'Oculto'}</span>
-            </button>
-          ))}
-          <p className="map-layer-note">Algunos estilos agrupan icono y texto; se oculta cada parte por separado cuando el estilo lo permite.</p>
-        </div>
+        {basemap === 'satellite' ? (
+          <p className="map-layer-note">
+            El satélite es imagen pura: nombres, iconos y fronteras solo existen en los estilos
+            vectoriales, así que no hay elementos que ocultar aquí.
+          </p>
+        ) : (
+          <div className="map-layer-toggles" role="group" aria-label="Elementos del mapa base">
+            <h3>Elementos del mapa</h3>
+            {(
+              [
+                ['placeIcons', 'Iconos de lugares', 'Pines, puntos de población y POI', MapPin],
+                ['names', 'Nombres', 'Ciudades, países, vías y masas de agua', Type],
+                ['borders', 'Fronteras', 'Límites administrativos', Landmark],
+              ] as const
+            ).map(([key, label, description, Icon]) => (
+              <button
+                key={key}
+                type="button"
+                className="map-layer-toggle"
+                aria-pressed={mapLayers[key]}
+                onClick={() => onMapLayersChange({ ...mapLayers, [key]: !mapLayers[key] })}
+              >
+                <Icon size={18} />
+                <span>
+                  <strong>{label}</strong>
+                  <small>{description}</small>
+                </span>
+                <span className="toggle-state" aria-hidden="true">
+                  {mapLayers[key] ? 'Visible' : 'Oculto'}
+                </span>
+              </button>
+            ))}
+            <p className="map-layer-note">
+              Algunos estilos agrupan icono y texto; se oculta cada parte por separado cuando el
+              estilo lo permite.
+            </p>
+          </div>
+        )}
         <p className="tool-hint">La cartografía cambia; tus vuelos y capas se mantienen.</p>
       </ToolPopover>
       <WeatherPanel

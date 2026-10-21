@@ -13,6 +13,7 @@ import { buildAircraftObject } from '@/data/aircraft3dModels'
 import {
   DEFAULT_PERFORMANCE,
   GROUND_TILE_PX,
+  GROUND_ZOOM_BONUS,
   MESH_SEGMENTS,
   MIN_AUTO_RATIO,
   QUALITY_LABELS,
@@ -76,6 +77,9 @@ const DETAIL_DRIFT_FRACTION = 0.22
 const DETAIL_FEATHER = 0.07
 /** Share of the wide patch width faded into the horizon backdrop. */
 const PATCH_FEATHER = 0.025
+/** Hillshade strength of the wide terrain mesh and of the sharp patch. */
+const HILLSHADE_WIDE = 0.34
+const HILLSHADE_DETAIL = 0.16
 /** Resolution governor: measurement window and warm-up before adapting. */
 const ADAPT_WINDOW_MS = 2_000
 const ADAPT_WARMUP_MS = 4_000
@@ -473,6 +477,12 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
             flatHidden: state?.flatHidden ?? false,
             farWindow: state?.farWindow
               ? { z: state.farWindow.z, size: Math.round(state.farWindow.sizeMeters) }
+              : null,
+            groundWindow: state?.patchWindow
+              ? { z: state.patchWindow.z, size: Math.round(state.patchWindow.sizeMeters) }
+              : null,
+            sharpWindow: state?.detailWindow
+              ? { z: state.detailWindow.z, size: Math.round(state.detailWindow.sizeMeters) }
               : null,
             farFetching: state?.farFetching ?? null,
             quality: state
@@ -1242,7 +1252,13 @@ function requestGround(
     onGround: live.onGround,
   }
   const altitudeM = position.onGround ? 0 : position.altM
-  const win = viewWindow(position.lat, position.lon, altitudeM, range)
+  const win = viewWindow(
+    position.lat,
+    position.lon,
+    altitudeM,
+    range,
+    GROUND_ZOOM_BONUS[state.quality.mesh],
+  )
   const driftNorthM = (position.lat - state.anchorLat) * EARTH_M_PER_DEG
   const driftEastM =
     (position.lon - state.anchorLon) * EARTH_M_PER_DEG * Math.cos((state.anchorLat * Math.PI) / 180)
@@ -1251,7 +1267,7 @@ function requestGround(
   const driftLimit = Math.max(REFRESH_DRIFT_M, (state.patchWindow?.sizeMeters ?? 0) * 0.08)
   const mesh = state.quality.mesh
   const textures = state.quality.textures
-  const qualityKey = `${MESH_SEGMENTS[mesh]}/${GROUND_TILE_PX[textures]}/${TERRAIN_STRIDE[mesh]}`
+  const qualityKey = `${MESH_SEGMENTS[mesh]}/${GROUND_TILE_PX[textures]}/${TERRAIN_STRIDE[mesh]}/${GROUND_ZOOM_BONUS[mesh]}`
   const needs =
     !state.patchWindow ||
     state.patchWindow.z !== win.z ||
@@ -1370,6 +1386,39 @@ function featherRim(source: HTMLCanvasElement, fraction: number): HTMLCanvasElem
   return canvas
 }
 
+/**
+ * Bakes a soft hillshade into an unlit ground material.
+ *
+ * The ground is a `MeshBasicMaterial` on purpose (the satellite pixels must
+ * keep their exact tone), but that means the DEM relief was invisible: a
+ * mountain range looked as flat as a plain. The shader below multiplies the
+ * imagery by a diffuse term computed from the mesh normals, which is free per
+ * fragment and only depends on the geometry already uploaded. `strength` 0
+ * leaves the layer untouched (used for the sharp patch, whose normals are too
+ * fine to shade without noise).
+ */
+function applyHillshade(material: THREE.MeshBasicMaterial, strength: number): void {
+  if (strength <= 0) return
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.hillshade = { value: strength }
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGroundNormal;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGroundNormal = normalize(normal);')
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGroundNormal;\nuniform float hillshade;')
+      .replace(
+        '#include <opaque_fragment>',
+        `// Sun from the north-west, like every printed relief map.
+        vec3 groundNormal = normalize(vGroundNormal);
+        float shade = dot(groundNormal, normalize(vec3(-0.55, 0.72, -0.42)));
+        float relief = 1.0 + hillshade * (shade - 0.55);
+        outgoingLight *= clamp(relief, 1.0 - hillshade, 1.0 + hillshade);
+        #include <opaque_fragment>`,
+      )
+  }
+  material.customProgramCacheKey = () => `ground-hillshade-${strength}`
+}
+
 function groundMaterial(
   state: SceneState,
   canvas: HTMLCanvasElement,
@@ -1482,6 +1531,9 @@ function applyDetail(
   const geometry = groundGeometry(win, terrain, segments, { u0, v0, du: size, dv: size }, heightAt)
   const rim = featherRim(canvas, DETAIL_FEATHER)
   const mesh = new THREE.Mesh(geometry, groundMaterial(state, rim, true, false, true))
+  // Light touch on the sharp patch: enough to keep the seam invisible when it
+  // overlaps shaded relief, never enough to look like a second light source.
+  applyHillshade(mesh.material as THREE.MeshBasicMaterial, HILLSHADE_DETAIL)
   mesh.renderOrder = 2
   // Relative to the wide patch centre, from the tile indices: `groundGroup`
   // already carries the patch position and the drift, and this mesh is a child
@@ -1631,6 +1683,10 @@ function applyPatch(
     const geometry = groundGeometry(win, terrain, MESH_SEGMENTS[state.quality.mesh])
     const rim = featherRim(patch.canvas, PATCH_FEATHER)
     const material = groundMaterial(state, rim, false, false, true)
+    // The wide mesh carries the DEM relief: shading it is what makes mountains
+    // readable instead of a flat tint. Its normals are one per DEM sample, so
+    // there is no shimmer.
+    applyHillshade(material, HILLSHADE_WIDE)
     state.groundObject = new THREE.Mesh(geometry, material)
   } else {
     state.groundObject = new THREE.GridHelper(win.sizeMeters, 40, 0x2f3d4d, 0x1b232d)

@@ -173,10 +173,14 @@ export function viewWindow(
   lonDeg: number,
   altitudeM: number,
   mult = 1,
+  zoomBonus = 0,
 ): GroundWindow {
   const clamped = Math.max(1, Math.min(5, Math.round(mult)))
   const { zoomOffset, n } = viewLayout(clamped)
-  return groundWindow(latDeg, lonDeg, tileZoomForAltitude(altitudeM) - zoomOffset, n)
+  // The bonus is a quality knob: it buys sharper texels with the same tile
+  // count, never past the deepest level the raster providers serve.
+  const z = Math.min(19, tileZoomForAltitude(altitudeM) + Math.max(0, Math.round(zoomBonus)))
+  return groundWindow(latDeg, lonDeg, z - zoomOffset, n)
 }
 
 /**
@@ -679,7 +683,7 @@ export function detailWindow(
   baseZoom: number,
   n = DETAIL_TILES,
 ): GroundWindow {
-  return groundWindow(latDeg, lonDeg, baseZoom + DETAIL_ZOOM_JUMP, n)
+  return groundWindow(latDeg, lonDeg, Math.min(19, baseZoom + DETAIL_ZOOM_JUMP), n)
 }
 
 /**

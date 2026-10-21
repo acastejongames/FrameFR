@@ -166,6 +166,13 @@ completa con:
   se oculta para no competir con la geometría real.
 - **Panel derecho:** tabla del tráfico del sector visible, ordenable por
   altitud, velocidad o indicativo.
+- **Mapa 2D con imagen satelital:** además de los estilos vectoriales
+  (Positron, Bright, Liberty, Dark, Fiord) y del estilo 3D, el panel *Mapa*
+  ofrece **Satélite**: el mismo ráster Esri World Imagery que usa el suelo del
+  visor 3D, cargado como estilo propio de MapLibre. No necesita clave ni
+  registro, arranca un nivel de zoom más cerca para que la foto se vea nítida
+  en pantallas densas y se recuerda entre sesiones. Al ser imagen pura, el
+  panel explica que los conmutadores de nombres/iconos/fronteras no aplican.
 - **Barra inferior:** leyenda de estados, estilo cartográfico, etiquetas,
   inclinación 3D, modo limpio y geolocalización. La pequeña brújula independiente
   restablece el norte al pulsarla sin cambiar centro, zoom ni inclinación.
@@ -297,7 +304,11 @@ interfaz necesitan cambios.
   del visor). En el visor 3D la malla del terreno pasa de 256² a 144²/96²
   vértices y el modelo se decima con meshoptimizer conservando UV y normales;
   las texturas bajan de 1024² a 512²/256² y el terreno compone a 256/128/64 px
-  por tesela. La resolución de renderizado automática mide los FPS y ajusta el
+  por tesela. En la calidad **Alta** el suelo pide además un nivel de zoom más
+  (la mitad de metros por píxel con el mismo número de teselas, ~58 km de
+  ventana en crucero más el fondo hasta el horizonte) y el relieve del DEM se
+  sombrea con un hillshade barato en el shader, así que las montañas dejan de
+  verse planas. La resolución de renderizado automática mide los FPS y ajusta el
   búfer entre ×0,75 y el máximo del equipo, y la calidad del mapa usa
   `setPixelRatio` de MapLibre (en *Rendimiento* dibuja 1 píxel por píxel CSS
   en lugar de hasta 3× en móviles). Ningún ajuste desactiva funciones.
@@ -391,6 +402,10 @@ https://acastejongames.github.io/FrameFR/
 
 - Cartografía: [OpenFreeMap](https://openfreemap.org) · [OpenMapTiles](https://www.openmaptiles.org/) ·
   © [OpenStreetMap](https://www.openstreetmap.org/copyright).
+- Imagen satelital (mapa 2D y suelo del visor 3D): [Esri World
+  Imagery](https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9)
+  (Esri, Maxar, Earthstar Geographics); relieve del DEM público de Terrarium
+  ([AWS Open Data](https://registry.opendata.aws/terrain-tiles/)).
 - Datos ADS-B: [adsb.lol](https://adsb.lol) · [ADSB.one](https://www.adsb.one) ·
   [adsb.fi](https://adsb.fi) · [airplanes.live](https://airplanes.live) ·
   [Flightradar24](https://www.flightradar24.com) · [OpenSky Network](https://opensky-network.org).

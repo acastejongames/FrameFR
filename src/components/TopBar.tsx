@@ -81,34 +81,6 @@ export const TopBar = forwardRef<HTMLInputElement, TopBarProps>(function TopBar(
         {/* Brand + search + shortcuts */}
         <div className="topbar-primary">
           <div className="app-brand">
-            <svg className="h-7 w-7 shrink-0" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-              <rect
-                x="2"
-                y="2"
-                width="32"
-                height="32"
-                rx="6"
-                fill="#1b222c"
-                stroke="#ffbe00"
-                strokeWidth="1.5"
-              />
-              <circle
-                cx="18"
-                cy="18"
-                r="10"
-                stroke="#4b5563"
-                strokeWidth="1.2"
-                strokeDasharray="2 2"
-              />
-              <path
-                d="M18 8L21 16L29 18L21 20L18 28L15 20L7 18L15 16L18 8Z"
-                fill="#ffbe00"
-                fillOpacity="0.2"
-                stroke="#ffbe00"
-                strokeWidth="1.3"
-              />
-              <circle cx="18" cy="18" r="2.2" fill="#ffbe00" />
-            </svg>
             <div className="leading-none">
               <div className="cond text-[17px] font-bold tracking-tight text-white">
                 AERO<span className="text-accent">SCOPE</span>

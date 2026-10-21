@@ -45,10 +45,6 @@ select:focus-visible {
   gap: 10px;
   flex-shrink: 0;
 }
-.app-brand > svg {
-  height: 34px;
-  width: 34px;
-}
 .global-search {
   position: relative;
   flex: 1;
@@ -411,6 +407,14 @@ select:focus-visible {
     );
   color: #c2cbd6;
 }
+.map-swatch-satellite {
+  background-color: #3e5641;
+  background-image:
+    repeating-linear-gradient(24deg, #4b6347 0 14px, #3a4f3c 15px 26px, #566b4a 27px 40px),
+    radial-gradient(circle at 62% 38%, #8d9a6b 0 18%, transparent 19%),
+    radial-gradient(circle at 30% 72%, #6c7f58 0 22%, transparent 23%);
+  color: #e4ecd9;
+}
 .map-swatch-positron {
   background-color: #d5ddd9;
   color: #475956;
@@ -536,10 +540,6 @@ select:focus-visible {
   }
   .app-brand {
     height: 40px;
-  }
-  .app-brand > svg {
-    width: 29px;
-    height: 29px;
   }
   .app-brand .cond {
     font-size: 16px;

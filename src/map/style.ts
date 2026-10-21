@@ -1,16 +1,63 @@
-import type { Map as MapLibreMap } from 'maplibre-gl'
+import type { Map as MapLibreMap, StyleSpecification } from 'maplibre-gl'
 import { GLYPH_FONT, OPENFREEMAP_STYLES_URL } from '@/config'
+import { SATELLITE_TEMPLATE } from '@/data/mapTiles'
 
-export type BasemapId = 'positron' | 'bright' | 'liberty' | 'dark' | 'fiord' | '3d'
+export type BasemapId = 'satellite' | 'positron' | 'bright' | 'liberty' | 'dark' | 'fiord' | '3d'
 
 export interface BasemapOption {
   id: BasemapId
   label: string
-  /** MapLibre style served by OpenFreeMap (no API key, no registration). */
+  /** MapLibre style URL (vector styles); empty when the style is inline. */
   url: string
+  /** Inline style for basemaps that are not served as a style document. */
+  style?: StyleSpecification
   /** Camera tilt. Only the 3D view tilts; the rest stay flat as before. */
   pitch: number
   bearing: number
+}
+
+/** Credit required by the satellite provider (same source as the 3D ground). */
+export const SATELLITE_ATTRIBUTION = 'Imágenes satelitales: Esri, Maxar, Earthstar Geographics'
+
+/**
+ * Real satellite imagery for the flat map, without an API key or registration.
+ *
+ * The very same Esri World Imagery raster the 3D viewer streams is declared as
+ * a MapLibre raster source, so the 2D map gains a photographic basemap (it was
+ * only available inside the 3D view) with no extra provider or token. The tile
+ * template keeps Esri's `{z}/{y}/{x}` order: MapLibre resolves the placeholders
+ * by name, so the URL stays valid.
+ */
+function satelliteStyle(): StyleSpecification {
+  return {
+    version: 8,
+    name: 'AeroScope · Satélite',
+    sources: {
+      satellite: {
+        type: 'raster',
+        tiles: [SATELLITE_TEMPLATE],
+        tileSize: 256,
+        minzoom: 0,
+        maxzoom: 19,
+        attribution: SATELLITE_ATTRIBUTION,
+      },
+    },
+    layers: [
+      // Dark base so the map never flashes white while the first tiles decode.
+      { id: 'fondo', type: 'background', paint: { 'background-color': '#0b0e12' } },
+      {
+        id: 'satelite',
+        type: 'raster',
+        source: 'satellite',
+        paint: { 'raster-opacity': 1, 'raster-fade-duration': 120 },
+      },
+    ],
+  }
+}
+
+/** Style to hand to MapLibre: an inline document or a style URL. */
+export function basemapSource(option: BasemapOption): string | StyleSpecification {
+  return option.style ?? option.url
 }
 
 /**
@@ -18,6 +65,14 @@ export interface BasemapOption {
  * style: "3D" is Liberty, whose buildings are extruded, viewed with a tilt.
  */
 export const BASEMAPS: BasemapOption[] = [
+  {
+    id: 'satellite',
+    label: 'Satélite',
+    url: '',
+    style: satelliteStyle(),
+    pitch: 0,
+    bearing: 0,
+  },
   { id: 'positron', label: 'Positron', url: `${OPENFREEMAP_STYLES_URL}/positron`, pitch: 0, bearing: 0 },
   { id: 'bright', label: 'Bright', url: `${OPENFREEMAP_STYLES_URL}/bright`, pitch: 0, bearing: 0 },
   { id: 'liberty', label: 'Liberty', url: `${OPENFREEMAP_STYLES_URL}/liberty`, pitch: 0, bearing: 0 },

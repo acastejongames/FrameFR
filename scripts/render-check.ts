@@ -225,7 +225,7 @@ expect(container.querySelector('.ui-overlay')?.hasAttribute('inert') ?? false, '
 window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'u', bubbles: true }))
 await flush()
 expect(!window.document.body.classList.contains('ui-clean-mode'), 'U debe recuperar la interfaz')
-expect(container.querySelectorAll('#map-tools .basemap-option').length === 6, 'todos los mapas disponibles en la barra')
+expect(container.querySelectorAll('#map-tools .basemap-option').length === 7, 'todos los mapas disponibles en la barra')
 mapTrigger.click()
 await flush()
 const layerToggles = [...container.querySelectorAll<HTMLButtonElement>('#map-tools .map-layer-toggle')]

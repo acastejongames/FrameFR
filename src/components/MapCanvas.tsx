@@ -5,6 +5,7 @@ import type { ProviderId } from '@/data/registry'
 import { FleetController, type FleetFilters } from '@/engine/fleetController'
 import { AIRCRAFT_LAYER, addAircraftLayers, setLabelsVisible, setTrailVisible } from '@/map/aircraftLayers'
 import {
+  basemapSource,
   captureBasemapLayers,
   getBasemap,
   setBasemapLayerVisibility,
@@ -129,9 +130,12 @@ export function MapCanvas({
     const initialBasemap = getBasemap(latest.current.basemap)
     const map = new Map({
       container,
-      style: initialBasemap.url,
+      style: basemapSource(initialBasemap),
       center: DEFAULT_VIEW.center,
-      zoom: DEFAULT_VIEW.zoom,
+      // Photographic basemaps need more texels per screen pixel than a vector
+      // style to look right on a dense phone screen, so they start one level
+      // deeper (about twice the effective imagery resolution).
+      zoom: DEFAULT_VIEW.zoom + (initialBasemap.id === 'satellite' ? 1 : 0),
       pitch: latest.current.is3D ? 54 : initialBasemap.pitch,
       bearing: 0,
       minZoom: 1.5,
@@ -373,7 +377,7 @@ export function MapCanvas({
     appliedBasemap.current = basemap
     const option = getBasemap(basemap)
     // Full rebuild (not diff) so the aircraft layers are cleanly re-added on style.load.
-    map.setStyle(option.url, { diff: false })
+    map.setStyle(basemapSource(option), { diff: false })
     map.setMaxPitch(70)
     map.easeTo({ pitch: latest.current.is3D ? 54 : option.pitch, bearing: option.bearing, duration: 600 })
   }, [basemap])

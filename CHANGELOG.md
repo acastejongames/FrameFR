@@ -1,3 +1,32 @@
+## Satélite en el mapa 2D, marca solo en la pestaña y terreno más fino — 2026-10-21
+
+- **El icono de AeroScope sale de la barra superior.** La marca queda como
+  wordmark y el emblema vive únicamente en el icono de la pestaña del
+  navegador, como se pidió.
+- **Imagen satelital en el mapa 2D.** El panel *Mapa* (y Ajustes › Interfaz)
+  estrena el estilo **Satélite**, que antes solo existía dentro de la vista
+  3D: es el mismo ráster Esri World Imagery, declarado como estilo propio de
+  MapLibre, sin clave de API ni registro. Arranca un nivel de zoom más cerca
+  (más texeles por píxel de pantalla) y se guarda entre sesiones. Como es
+  imagen pura, con satélite activo el panel oculta los conmutadores de
+  nombres/iconos/fronteras (no habría nada que ocultar) y lo explica.
+- **Suelo del visor 3D más nítido.** En calidad **Alta** la ventana del suelo
+  sube un nivel de zoom (z12 en crucero en vez de z11): la mitad de metros por
+  píxel con el mismo número de teselas, y el parche nítido sube con ella
+  (z14). Media y Baja mantienen la cobertura amplia de siempre.
+- **Relieve visible.** El suelo era `MeshBasicMaterial` sin luces, así que el
+  DEM no se notaba. Ahora un hillshade en el shader (sol del noroeste, coste
+  por fragmento nulo) sombrea la malla ancha y roza el parche nítido, con lo
+  que las montañas se leen como tales sin tocar el tono de la fotografía.
+- **Sin línea de unión entre parches.** El parche nítido y la malla ancha
+  difuminan su borde (alfa en el 7 % y 2,5 % del ancho), así que el escalón de
+  resolución entre ambos deja de verse como una línea que saltaba entre
+  fotogramas: el z-fighting medido en navegador real bajó del 1,5 % al 0,03 %
+  de píxeles.
+- **Pruebas:** `npm run smoke` comprueba el estilo satelital (origen ráster,
+  fondo oscuro, crédito), el nivel extra de zoom con el mismo recuento de
+  teselas y el tope en z19; `check:render` exige los siete estilos en la barra.
+
 ## Suelo del visor sin parpadeos y fotogrametría arreglada — 2026-10-21
 
 - **Fin de las «mallas que chocan» en la vista 3D.** Eran tres capas de suelo
