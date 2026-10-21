@@ -72,6 +72,10 @@ const REFRESH_DRIFT_M = 2_000
 const DAMPING_TAU_S = 0.22
 /** How far the plane may leave the sharp patch before it is renewed. */
 const DETAIL_DRIFT_FRACTION = 0.22
+/** Share of the sharp patch width faded out, so it melts into the wide one. */
+const DETAIL_FEATHER = 0.07
+/** Share of the wide patch width faded into the horizon backdrop. */
+const PATCH_FEATHER = 0.025
 /** Resolution governor: measurement window and warm-up before adapting. */
 const ADAPT_WINDOW_MS = 2_000
 const ADAPT_WARMUP_MS = 4_000
@@ -433,10 +437,21 @@ export default function Aircraft3DViewer({ aircraft, model, onClose }: Aircraft3
       // assert the camera stays where the user put it across telemetry ticks.
       if (import.meta.env.DEV) {
         const w = window as unknown as {
-          __viewer3d?: { setups: number; snap?: () => Record<string, unknown> }
+          __viewer3d?: {
+            setups: number
+            snap?: () => Record<string, unknown>
+            /** Live three.js objects, for the browser checks only. */
+            refs?: () => {
+              scene: THREE.Scene
+              camera: THREE.PerspectiveCamera
+              renderer: THREE.WebGLRenderer
+            } | null
+          }
         }
         w.__viewer3d = {
           setups: (w.__viewer3d?.setups ?? 0) + 1,
+          refs: () =>
+            state ? { scene: state.scene, camera: state.camera, renderer: state.renderer } : null,
           snap: () => ({
             cam: state?.camera.position.toArray() ?? null,
             target: state?.controls.target.toArray() ?? null,
@@ -1314,11 +1329,53 @@ function groundGeometry(
  * The sharp detail patch is transparent at its feathered rim and never
  * writes depth, so it blends into the wide patch underneath.
  */
+/**
+ * Returns a copy of the imagery whose outer `fraction` fades to transparent.
+ *
+ * Two ground layers of different resolution never line up pixel for pixel: at
+ * grazing angles the seam showed as a one-pixel line that jumped between frames
+ * (the "two meshes colliding" the viewer was reporting). Melting the rim of the
+ * upper layer into the one below removes the edge entirely, which is cheaper
+ * and quieter than any extra depth bias.
+ */
+function featherRim(source: HTMLCanvasElement, fraction: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = source.width
+  canvas.height = source.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return source
+  ctx.drawImage(source, 0, 0)
+  const w = canvas.width
+  const h = canvas.height
+  const band = Math.max(2, Math.round(Math.min(w, h) * fraction))
+  // `destination-in` multiplies the alpha already painted, so four edge ramps
+  // compose into a soft rectangular frame with an untouched centre.
+  ctx.globalCompositeOperation = 'destination-in'
+  const ramp = (x0: number, y0: number, x1: number, y1: number): CanvasGradient => {
+    const gradient = ctx.createLinearGradient(x0, y0, x1, y1)
+    gradient.addColorStop(0, 'rgba(0,0,0,0)')
+    gradient.addColorStop(1, 'rgba(0,0,0,1)')
+    return gradient
+  }
+  const bands: Array<[CanvasGradient, number, number, number, number]> = [
+    [ramp(0, 0, band, 0), 0, 0, band, h],
+    [ramp(w, 0, w - band, 0), w - band, 0, band, h],
+    [ramp(0, 0, 0, band), 0, 0, w, band],
+    [ramp(0, h, 0, h - band), 0, h - band, w, band],
+  ]
+  for (const [gradient, x, y, width, height] of bands) {
+    ctx.fillStyle = gradient
+    ctx.fillRect(x, y, width, height)
+  }
+  return canvas
+}
+
 function groundMaterial(
   state: SceneState,
   canvas: HTMLCanvasElement,
   detail = false,
   backdrop = false,
+  alpha = false,
 ): THREE.MeshBasicMaterial {
   const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
@@ -1328,11 +1385,13 @@ function groundMaterial(
   texture.generateMipmaps = true
   return new THREE.MeshBasicMaterial({
     map: texture,
-    transparent: detail,
+    // `alpha` layers carry a feathered rim (opaque centre, transparent edge),
+    // so their seams never show as a hard band.
+    transparent: detail || alpha,
     // The wide patch is the only layer that writes depth. The backdrop is
     // always behind it and the sharp patch always in front, so neither needs
     // to fight for the same depth values.
-    depthWrite: !detail && !backdrop,
+    depthWrite: !detail && !backdrop && !alpha,
     // Depth bias for the sharp patch: it sits on the wide mesh, and at long
     // orbit radii both fall inside the same depth quantum.
     polygonOffset: detail,
@@ -1421,7 +1480,8 @@ function applyDetail(
         Math.max(sampleHeight(terrain, u, v), baseSurfaceHeight(terrain, baseSpan, u, v) + 0.2)
     : undefined
   const geometry = groundGeometry(win, terrain, segments, { u0, v0, du: size, dv: size }, heightAt)
-  const mesh = new THREE.Mesh(geometry, groundMaterial(state, canvas, true))
+  const rim = featherRim(canvas, DETAIL_FEATHER)
+  const mesh = new THREE.Mesh(geometry, groundMaterial(state, rim, true, false, true))
   mesh.renderOrder = 2
   // Relative to the wide patch centre, from the tile indices: `groundGroup`
   // already carries the patch position and the drift, and this mesh is a child
@@ -1569,7 +1629,8 @@ function applyPatch(
 
   if (patch.canvas) {
     const geometry = groundGeometry(win, terrain, MESH_SEGMENTS[state.quality.mesh])
-    const material = groundMaterial(state, patch.canvas)
+    const rim = featherRim(patch.canvas, PATCH_FEATHER)
+    const material = groundMaterial(state, rim, false, false, true)
     state.groundObject = new THREE.Mesh(geometry, material)
   } else {
     state.groundObject = new THREE.GridHelper(win.sizeMeters, 40, 0x2f3d4d, 0x1b232d)
